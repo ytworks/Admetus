@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 from pathlib import Path
 
 from admetus.bundle.load import available, read_metadata
@@ -54,6 +55,49 @@ def _format(value: float | None, metric: str) -> str:
     if value is None:
         return "-"
     return f"{value:.{DECIMALS.get(metric, 4)}f}"
+
+
+def oof_comparison(models_dir: Path) -> dict[str, object]:
+    """Compare each bundle's pooled out-of-fold score with its held-out score.
+
+    Reported as a sentence rather than a table, because the point is not the per
+    endpoint number but the direction and size of the disagreement. Direction is
+    taken from the endpoint's metric: for MAE a smaller value is better, so
+    "flattering" means a *lower* out-of-fold number.
+
+    Generated, not remembered. The earlier pipeline's figure -- out-of-fold better at
+    26 of 29 endpoints by a median of 0.045 -- described calibrated, pruned,
+    single-booster predictions and does not survive the realignment: the shipped
+    prediction is now the mean of every fold model, while the out-of-fold score is
+    one booster per row, so out-of-fold is usually the pessimistic one.
+    """
+    present = set(available(models_dir))
+    gaps: list[tuple[str, float]] = []
+    for endpoint in all_endpoints():
+        if endpoint.key not in present:
+            continue
+        meta = read_metadata(models_dir / endpoint.key)
+        oof = (meta.get("cross_validation") or {}).get("pooled_oof_score")
+        held = ((meta.get("metrics") or {}).get("primary") or {}).get("value")
+        if oof is None or held is None:
+            continue
+        flatter = (oof - held) if endpoint.higher_is_better else (held - oof)
+        gaps.append((endpoint.key, flatter))
+
+    flattering = [g for g in gaps if g[1] > 0]
+    worst = max(gaps, key=lambda g: g[1]) if gaps else ("-", 0.0)
+    return {
+        "n": len(gaps),
+        "n_flattering": len(flattering),
+        "median_abs_gap": round(statistics.median(abs(g[1]) for g in gaps), 4) if gaps else None,
+        "largest_flattering": worst,
+        "sentence": (
+            f"out-of-fold and held-out disagree at every endpoint; out-of-fold is the "
+            f"more favourable of the two at {len(flattering)} of {len(gaps)}, and the "
+            f"median absolute gap is "
+            f"{statistics.median(abs(g[1]) for g in gaps):.3f}" if gaps else "no bundles"
+        ),
+    }
 
 
 def held_out_table(models_dir: Path, official_only: bool = False) -> str:
@@ -145,6 +189,11 @@ def main() -> int:
     if args.official:
         print("\n### Official protocol\n")
         print(official_table(args.official))
+    comparison = oof_comparison(args.models_dir)
+    print("\n<!-- cross-validation against held out -->")
+    print(f"<!-- {comparison['sentence']}; "
+          f"largest flattering gap: {comparison['largest_flattering'][0]} "
+          f"{comparison['largest_flattering'][1]:+.4f} -->")
     if args.areas:
         print("\n<!-- per area -->")
         for area, keys in AREAS:

@@ -165,6 +165,13 @@ Train every endpoint. This takes hours, skips endpoints that already have a mode
 admetus train --all --time-budget 900
 ```
 
+Resuming reuses a study's trials only while they can be shown to belong to the same folds. A
+study is named after the settings its trials depend on, and one of those -- the fold signature --
+was corrected to identify folds by dataset row rather than by position. A run interrupted before
+that change therefore tunes from zero once, and says so in a warning naming how many trials it
+left behind; they are not adopted, because the old name cannot establish which partition it
+measured.
+
 Run the official protocol, which trains on the benchmark group's own published split and scores
 its test set once per seed. The number this reports is the one comparable with the leaderboard;
 `admetus evaluate` reports this project's own random holdout instead.
@@ -346,8 +353,12 @@ compares every numeric cell.
 - The held-out column is a held-out-**row** score, not a held-out-molecule score. Nothing is
   deduplicated, so a molecule published twice can sit on both sides: 26 of Caco-2's 182 test
   rows share a feature vector with a training row.
-- A cross-validation score is not performance. Out-of-fold flattered the model at 26 of the 29
-  endpoints, by a median of 0.045.
+- A cross-validation score is not performance, and the two disagree at all 29 endpoints. The
+  pooled out-of-fold score is the more favourable of the two at 6 of them -- by 0.1847 on
+  `cyp2d6_substrate`, 0.7128 out of fold against 0.5282 held out -- and the less favourable at
+  the other 23, with a median absolute gap of 0.028. It is the pessimistic one more often
+  because it is one booster per row, while the shipped prediction is the mean of all three.
+  Either way it selected the model, so it is recorded as biased and reported nowhere.
 
 The engineering measurements -- throughput, memory, what each removed stage cost -- are in
 [docs/benchmark.md](docs/benchmark.md).

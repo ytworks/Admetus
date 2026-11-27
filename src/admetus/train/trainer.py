@@ -2,25 +2,32 @@
 
 This follows the reference implementation's arrangement:
 
-1. Standardize and featurize **before** splitting, so two rows that collapse to
-   the same molecule cannot end up on opposite sides.
-2. Hold out 20% at random, seeded. It is not looked at again until step 6.
-3. Split the remaining 80% into folds, and fit one model per fold, each stopping
-   early on its own validation rows.
-4. Fit the label transform and the column basis on the training rows only.
-5. Fit calibration and the decision threshold on the out-of-fold predictions.
-6. Touch the held-out 20% exactly once, and report it with a bootstrap interval.
+1. Parse and featurize each published row as it is. Nothing is standardized and
+   nothing is deduplicated, so two rows describing the same molecule stay two rows
+   and can land on opposite sides of the split.
+2. Hold out 20% at random, seeded, with ``train_test_split``. It is not looked at
+   again until step 5.
+3. ``KFold`` over the training portion, in the order the holdout left it, and one
+   model per fold, each stopping early on its own validation rows.
+4. Tune each fold on its own, so the folds end up with different parameters.
+5. Touch the held-out 20% exactly once, and report it with a bootstrap interval.
 
 The ensemble is the fold models themselves, averaged, with their spread reported
-beside the prediction -- not a refit at a pooled round count. Each member therefore
-early-stopped on the rows it predicts within cross-validation, which makes the
-out-of-fold score optimistic on top of being a selection score. It is recorded as
-biased and is never reported as performance; the held-out 20% is.
+beside the prediction -- not a refit at a pooled round count.
 
-Two things this deliberately does **not** do, both removed after they were measured:
-an applicability-domain flag, which was uninformative at 16 of 29 endpoints, and a
-conformal prediction interval, which over-covered at 8 of 9 regression endpoints by
-enough to be useless. Neither was asked for.
+The pooled out-of-fold score is recorded because it is what selected the model, and
+it is recorded as biased for that reason alone. It is not reliably optimistic: each
+member early-stopped on the rows it predicts within cross-validation, which pushes
+it up, but it is one booster per row where the shipped prediction is the mean of all
+of them, which pushes it down harder. Measured on the 29 shipped bundles it is the
+more favourable of the two at 6 endpoints and the less favourable at 23. Either way
+it selects and never reports; the held-out 20% does.
+
+Nothing is fitted on top of the ensemble. No label transform, no column basis, no
+probability calibration, no decision threshold, no applicability-domain flag and no
+conformal interval: each was an addition, each was measured, and each is gone.
+Calibration was the costly one -- it inverted the ranking on `carcinogens`, taking
+held-out AUROC from 0.7506 to 0.2494.
 """
 
 from __future__ import annotations
@@ -192,17 +199,40 @@ def train_endpoint(
             "%s: tuning %d fold(s) separately, %d train rows, %d columns (budget %ss each)",
             endpoint.key, len(fold_sets), train_rows.size, basis.n_cols, time_budget,
         )
-        for index, fold in enumerate(fold_sets):
-            study = tuning.study_name(
+        # A study is named after the settings its trials depend on, the fold signature
+        # among them, so correcting that signature renamed every study. An
+        # interrupted run resumed after the upgrade finds its own trials on disk
+        # under a name it no longer computes; they are not adopted, because the old
+        # name cannot establish which partition it measured. Say so once, rather than
+        # letting a resumed run look as though it had lost its history silently.
+        def study_for(index: int, row_ids: Any) -> str:
+            return tuning.study_name(
                 endpoint.key, spec.feature_set, basis.n_cols, len(fold_sets), params,
                 seed=seed,
-                fold_signature=f"{splits.fold_signature(fold_sets, train_rows)}-{index}",
+                fold_signature=f"{splits.fold_signature(fold_sets, row_ids)}-{index}",
             )
+
+        storage = tuning.study_path(models_dir, endpoint.key) if models_dir else None
+        stranded = tuning.unreachable_trials(
+            storage,
+            current=[study_for(i, train_rows) for i in range(len(fold_sets))],
+            superseded=[study_for(i, None) for i in range(len(fold_sets))],
+        )
+        if stranded:
+            log.warning(
+                "%s: %d trial(s) in this endpoint's study database were tuned under the "
+                "previous fold-signature scheme and cannot be shown to belong to these "
+                "folds, so they are not resumed. This run tunes from zero, once.",
+                endpoint.key, stranded,
+            )
+
+        for index, fold in enumerate(fold_sets):
+            study = study_for(index, train_rows)
             tuned = tuning.tune_fold(
                 x_train[fold.train], y_train[fold.train],
                 x_train[fold.test], y_train[fold.test],
                 params, seed=seed, time_budget=time_budget,
-                storage=tuning.study_path(models_dir, endpoint.key) if models_dir else None,
+                storage=storage,
                 study_name=study,
                 model_dir=tuning.booster_dir(models_dir, study) if models_dir else None,
             )

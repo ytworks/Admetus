@@ -23,7 +23,10 @@ from admetus.cli.options import (
 )
 from admetus.data.registry import resolve_keys
 from admetus.errors import EXIT_PARTIAL_FAILURE, AdmetusError, ModelError, UsageError
+from admetus.logging import get_logger
 from admetus.predict import runner
+
+log = get_logger("cli.predict")
 
 #: Rows that `--json` will carry inline. A JSON document holding a ten-million-row
 #: CSV is not a useful object, so a larger run is told to write a file instead of
@@ -240,17 +243,32 @@ def predict_command(
             raise SystemExit(EXIT_PARTIAL_FAILURE)
 
     def guarded() -> None:
-        """Run the body, and make sure a refusal reaches --report as well as stdout.
+        """Run the body, and make sure any failure reaches --report as well as stdout.
 
         A missing input file or an empty model directory is found before any work, so
         nothing used to be written: a report left from an earlier success stayed
         byte-for-byte in place and read as this run's result.
+
+        `SystemExit` is excluded because the paths that raise it have already written
+        the report that matches their status. Everything else is included, our own
+        exceptions and the operating system's alike: an unwritable output directory
+        raises `PermissionError` on `results.csv.part`, which is not an
+        `AdmetusError`, and a report caught only on `AdmetusError` kept saying
+        `ok: true` from the run before.
+
+        A report that cannot itself be written must not replace the error that got us
+        here, so the secondary failure is logged and the original is re-raised.
         """
         try:
             body()
-        except AdmetusError as exc:
+        except SystemExit:
+            raise
+        except BaseException as exc:
             if report_path is not None and not _report_written:
-                write_report(report_path, _failure_payload(exc, [], source))
+                try:
+                    write_report(report_path, _failure_payload(exc, [], source))
+                except OSError as report_exc:
+                    log.error("could not write the report to %s: %s", report_path, report_exc)
             raise
 
     run_guarded(guarded, as_json=as_json)

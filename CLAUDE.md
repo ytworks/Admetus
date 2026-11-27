@@ -41,9 +41,14 @@ contradict plausible-sounding estimates, and the measurements are what the desig
    editing a cell; both READMEs carry the same numbers and CI compares every numeric cell.
    Do not fill a gap with an estimate, and do not leave placeholders.
 2. **Cross-validation scores are not performance.** They select; they do not report. Every record
-   carries `cv_score_biased: true`, and it is measured: out-of-fold flattered the model at 26 of
-   the 29 endpoints, by a median of 0.045. Headline numbers come from the held-out set, with a
-   bootstrap interval, or from the official protocol.
+   carries `cv_score_biased: true`, and the disagreement is measured on the current bundles by
+   `scripts/benchmark_tables.py`: out-of-fold and held-out differ at all 29 endpoints, with
+   out-of-fold the more favourable of the two at 6 of them (by 0.1847 on `cyp2d6_substrate`) and
+   the less favourable at the other 23, median absolute gap 0.028. It reads pessimistic more often
+   because it is one booster per row while the shipped prediction is the mean of all three. The
+   earlier "flattered at 26 of 29 by a median of 0.045" described the calibrated, pruned,
+   single-booster pipeline and does not hold here. Headline numbers come from the held-out set,
+   with a bootstrap interval, or from the official protocol.
 3. **Never substitute a molecule.** A parse failure is reported with a reason. There is a test
    asserting no substitution happens; do not relax it.
 4. **The held-out set is sacred.** It is the random 20% and it is looked at once, at training

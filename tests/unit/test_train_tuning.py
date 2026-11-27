@@ -8,6 +8,8 @@ boosters come back, and that the study resumes.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from scipy import sparse
@@ -351,3 +353,42 @@ def test_a_rebuild_falls_back_to_the_study_then_to_the_trial():
     from_trial = _rebuild(full_params=None, study_attr=None, trial_params={"bagging_fraction": 0.7})
     assert from_trial.params["bagging_fraction"] == 0.7
     assert "earlier stages' choices are lost" in from_trial.rebuilt_from
+
+
+def test_superseded_studies_are_counted_not_adopted(tmp_path):
+    """A resumed run says how many trials it left behind, and takes none of them.
+
+    Correcting the fold signature to identify folds by dataset row renamed every
+    study, so a run interrupted before that change finds its own trials under a name
+    it no longer computes. They are reported, not migrated: the old name cannot
+    establish which partition it measured, which is the defect it had.
+    """
+    import optuna
+
+    storage = tmp_path / "dili.sqlite"
+    url = f"sqlite:///{storage}"
+    for name in ("admetus-dili-old0", "admetus-dili-old1"):
+        study = optuna.create_study(study_name=name, storage=url, direction="minimize")
+        for value in (0.3, 0.2, 0.1):
+            study.add_trial(optuna.trial.create_trial(params={}, distributions={}, value=value))
+
+    stranded = tuning.unreachable_trials(
+        storage,
+        current=["admetus-dili-new0", "admetus-dili-new1"],
+        superseded=["admetus-dili-old0", "admetus-dili-old1"],
+    )
+    assert stranded == 6
+
+    # Once this version's own studies exist, there is nothing to report any more.
+    optuna.create_study(study_name="admetus-dili-new0", storage=url, direction="minimize")
+    assert tuning.unreachable_trials(
+        storage,
+        current=["admetus-dili-new0", "admetus-dili-new1"],
+        superseded=["admetus-dili-old0", "admetus-dili-old1"],
+    ) == 0
+
+
+def test_counting_superseded_studies_never_fails_a_training_run():
+    """Bookkeeping must not be the reason a run dies."""
+    assert tuning.unreachable_trials(None, current=["a"], superseded=["b"]) == 0
+    assert tuning.unreachable_trials(Path("/nonexistent/x.sqlite"), current=["a"], superseded=["b"]) == 0

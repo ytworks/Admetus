@@ -85,3 +85,68 @@ def test_the_mcc_flag_reads_the_absence_of_an_operating_point_score():
     both = _mcc_note(has_searched_mcc=True, retrospective_only=False)
     assert "retrospective diagnostic" in both
     assert "`mcc` is the score at the operating point" in both
+
+
+def test_an_output_that_cannot_be_written_replaces_the_success_report(runner, tmp_path, monkeypatch):
+    """An `OSError` is a failed run too, and the report has to say so.
+
+    The guard caught only `AdmetusError`, so a `PermissionError` on the output file
+    went straight to the outer handler: stdout reported the failure while a report
+    left by an earlier successful run stayed byte-for-byte in place.
+    """
+    report = tmp_path / "report.json"
+    _stale_success(report)
+    source = tmp_path / "in.csv"
+    source.write_text("smiles\nCCO\n", encoding="utf-8")
+    models = tmp_path / "models"
+    models.mkdir()
+    (models / "dili").mkdir()
+
+    # Reached before any bundle is loaded, which is enough: the point is which
+    # handler the error lands in, not where it was raised.
+    def refuse(*_args, **_kwargs):
+        raise PermissionError(13, "Permission denied", str(tmp_path / "out.csv.part"))
+
+    monkeypatch.setattr("admetus.cli.cmd_predict.available", refuse)
+
+    result = runner.invoke(
+        cli,
+        ["predict", "--models-dir", str(models), "--endpoint", "dili",
+         "-i", str(source), "-o", str(tmp_path / "out.csv"), "--report", str(report)],
+    )
+
+    assert result.exit_code != 0
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["ok"] is False
+    assert payload["error_type"] == "PermissionError"
+
+
+def test_an_unwritable_report_does_not_replace_the_error_that_caused_it(runner, tmp_path, monkeypatch):
+    """The original failure is what the caller needs; the report's own is secondary."""
+    source = tmp_path / "in.csv"
+    source.write_text("smiles\nCCO\n", encoding="utf-8")
+    models = tmp_path / "models"
+    models.mkdir()
+    (models / "dili").mkdir()
+
+    def refuse(*_args, **_kwargs):
+        raise PermissionError(13, "Permission denied", "out.csv.part")
+
+    def refuse_report(*_args, **_kwargs):
+        raise OSError(30, "Read-only file system")
+
+    monkeypatch.setattr("admetus.cli.cmd_predict.available", refuse)
+    monkeypatch.setattr("admetus.cli.cmd_predict.write_report", refuse_report)
+
+    result = runner.invoke(
+        cli,
+        ["predict", "--models-dir", str(models), "--endpoint", "dili",
+         "-i", str(source), "--json", "--report", str(tmp_path / "ro" / "report.json")],
+    )
+
+    assert result.exit_code != 0
+    # The log line about the unwritable report goes to standard error, which is where
+    # it belongs: standard output stays one JSON document.
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "PermissionError"
+    assert "Read-only file system" not in payload["error"]

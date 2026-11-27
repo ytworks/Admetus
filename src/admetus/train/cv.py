@@ -128,8 +128,12 @@ def fit_fold(
         stop_on_fold: Early-stop on the fold's **own** validation rows, which is
             what the reference implementation does: each ensemble member stops on
             the rows it is then asked to predict. That makes this fold's prediction
-            optimistic, so the number that gets reported comes from the 20% holdout
-            and never from here. The alternative -- carving an inner watchlist from
+            optimistic *as an estimate of that member's own accuracy*, so the number
+            that gets reported comes from the 20% holdout and never from here. It
+            does not follow that the pooled out-of-fold score exceeds the held-out
+            one: that compares a single booster per row with the mean of all of
+            them, and on the shipped bundles out-of-fold is the lower of the two at
+            23 of 29 endpoints. The alternative -- carving an inner watchlist from
             the fold's training rows -- keeps the fold prediction honest but is not
             the arrangement that was asked for.
 

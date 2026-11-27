@@ -106,8 +106,10 @@ class TuneResult:
             # This record describes ONE fold, so the budget is this fold's.
             "time_budget_seconds": self.time_budget,
             # The tuner selects on the very rows it early-stops against, so this
-            # score is optimistic as well as being a selection score. Reported
-            # numbers come from the held-out 20%.
+            # score is optimistic about this booster as well as being a selection
+            # score. That is not a claim that it sits above the held-out number,
+            # which is the whole ensemble's. Reported numbers come from the
+            # held-out 20%.
             "cv_score_biased": True,
             "tuner_failed": self.tuner_failed,
             "rebuilt_from": self.rebuilt_from or None,
@@ -132,6 +134,41 @@ def booster_dir(models_dir: Path, study: str) -> Path:
     cannot overwrite the file belonging to another study's winning trial.
     """
     return Path(models_dir) / STUDIES_DIR / f"{study}-boosters"
+
+
+def unreachable_trials(storage: Path | None, current: list[str], superseded: list[str]) -> int:
+    """Count trials sitting in studies this run will not resume.
+
+    A study is named after the settings that decide whether its trials still apply,
+    and the fold signature is one of them. Correcting that signature to hash dataset
+    row identities rather than positions into the training array therefore renamed
+    every study: an interrupted run, resumed after upgrading, finds its own trials on
+    disk under a name it no longer computes and starts again from zero.
+
+    They are not migrated. The old name cannot establish which partition it measured
+    -- that is the defect it had -- so adopting its trials would mean extending a
+    search against folds that may not be the folds in front of us. The cost is
+    reported instead, once, so an operator knows why a resumed run is tuning from
+    scratch and can decide whether to wait.
+
+    Returns 0 on any storage this cannot read: this is bookkeeping, and it must never
+    be the reason a training run fails.
+    """
+    if storage is None or not Path(storage).exists():
+        return 0
+    try:
+        import optuna
+
+        url = f"sqlite:///{Path(storage)}"
+        present = {s.study_name: s for s in optuna.get_all_study_summaries(storage=url)}
+        if any(name in present for name in current):
+            return 0
+        return sum(
+            present[name].n_trials for name in superseded if name in present
+        )
+    except Exception as exc:  # noqa: BLE001 - a study database we cannot read is not an error
+        log.debug("could not inspect %s for superseded studies: %s", storage, exc)
+        return 0
 
 
 def study_path(models_dir: Path, key: str) -> Path:
