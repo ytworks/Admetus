@@ -142,3 +142,15 @@ def test_resolve_keys():
     assert [e.key for e in resolve_keys(["dili", "caco2"])] == ["dili", "caco2"]
     with pytest.raises(UsageError, match="no endpoint selected"):
         resolve_keys([])
+
+
+def test_evaluate_requires_a_bundle_not_just_a_directory(tmp_path):
+    """An interrupted training run leaves its tuning study behind with no bundle.
+
+    Presence of the record is the test, which is what `models list` applies too.
+    """
+    from admetus.bundle.load import available
+
+    (tmp_path / "dili").mkdir()
+    (tmp_path / "dili" / "optuna.sqlite").write_bytes(b"not a bundle")
+    assert available(tmp_path) == []

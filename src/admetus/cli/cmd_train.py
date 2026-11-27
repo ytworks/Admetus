@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 
 from admetus.bundle import save as bundle_save
-from admetus.bundle.load import read_metadata, verify
+from admetus.bundle.load import available, read_metadata, verify
 from admetus.cli.options import (
     all_option,
     data_dir_option,
@@ -178,11 +178,17 @@ def evaluate_command(
     def body() -> None:
         directory = Path(models_dir or default_models_dir())
         selected = resolve_keys(endpoints, select_all)
+        # A directory can exist without holding a bundle: an interrupted training
+        # run leaves its tuning study behind. Presence of the record is the test,
+        # which is the same one `models list` applies.
+        present = set(available(directory))
         rows = []
+        missing = []
         for endpoint in selected:
-            path = directory / endpoint.key
-            if not path.is_dir():
+            if endpoint.key not in present:
+                missing.append(endpoint.key)
                 continue
+            path = directory / endpoint.key
             meta = read_metadata(path)
             metrics = meta.get("metrics") or {}
             rows.append({
@@ -197,10 +203,19 @@ def evaluate_command(
             })
 
         if as_json:
-            emit({"ok": True, "models_dir": str(directory), "n_models": len(rows), "results": rows})
+            emit({
+                "ok": True,
+                "models_dir": str(directory),
+                "n_models": len(rows),
+                "n_missing": len(missing),
+                "missing": missing,
+                "results": rows,
+            })
             return
         if not rows:
             click.echo(f"no trained models in {directory}")
+            if missing:
+                click.echo(f"train them with: admetus train --endpoint {missing[0]}")
             raise SystemExit(3)
         click.echo(f"{'endpoint':<22} {'metric':<9} {'held-out (95% CI)':<26} {'n':>5}  notes")
         for row in rows:
@@ -219,6 +234,11 @@ def evaluate_command(
             click.echo(
                 f"{row['endpoint']:<22} {row['metric']:<9} {score:<26} "
                 f"{primary.get('n', 0):>5}  {', '.join(notes)}"
+            )
+        if missing:
+            click.echo(
+                f"\n{len(missing)} endpoint(s) have no trained model yet: "
+                f"{', '.join(missing[:6])}{' ...' if len(missing) > 6 else ''}"
             )
 
     run_guarded(body, as_json=as_json)
