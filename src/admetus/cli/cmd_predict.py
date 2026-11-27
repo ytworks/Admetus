@@ -197,6 +197,9 @@ def predict_command(
         if inline_json:
             try:
                 payload["predictions"] = _rows_from_csv(json_csv, report, options)
+            except AdmetusError as exc:
+                write_report(report_path, _failure_payload(exc, models, input_path))
+                raise
             finally:
                 json_csv.unlink(missing_ok=True)
         if as_json:
@@ -207,9 +210,22 @@ def predict_command(
                 f"{report.n_failed} failed -> {out_path}",
                 err=True,
             )
-        # Exit 4 covers both documented cases: --strict with any failure, and every
-        # row failing. The report has already been written either way.
-        if report.all_failed or (strict and report.n_failed):
+        # The report has to say what the command returned, on every path. It used to
+        # be written as soon as the run finished, so a --strict failure, a refusal
+        # during JSON conversion or a preflight error all left an `ok: true` report
+        # behind -- in one case a stale one from an earlier success.
+        strict_failure = bool(strict and report.n_failed)
+        if report.all_failed or strict_failure:
+            write_report(
+                report_path,
+                {
+                    **payload,
+                    "ok": False,
+                    "exit_code": EXIT_PARTIAL_FAILURE,
+                    "failure": "every row failed" if report.all_failed else
+                               "--strict was given and at least one molecule failed",
+                },
+            )
             raise SystemExit(EXIT_PARTIAL_FAILURE)
 
     run_guarded(body, as_json=as_json)

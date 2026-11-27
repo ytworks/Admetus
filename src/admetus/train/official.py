@@ -100,19 +100,29 @@ class OfficialResult:
 
     @property
     def mean(self) -> float:
-        return float(self.scores.mean()) if self.runs else float("nan")
+        """The leaderboard's own figure: each seed rounded, then the mean, rounded.
+
+        TDC rounds every seed's metric to three decimals before averaging, uses the
+        **population** standard deviation, and rounds the aggregate. Using unrounded
+        scores and the sample deviation gave 0.9097 +/- 0.0040 where TDC's own
+        aggregation of the same five results gives 0.910 +/- 0.003. The raw per-seed
+        scores stay in the records.
+        """
+        if not self.runs:
+            return float("nan")
+        return float(np.round(np.round(self.scores, 3).mean(), 3))
 
     @property
     def sd(self) -> float:
-        """Standard deviation over seeds, the spread the leaderboard reports.
+        """Population standard deviation of the rounded per-seed scores, rounded."""
+        if not self.runs:
+            return float("nan")
+        return float(np.round(np.round(self.scores, 3).std(ddof=0), 3))
 
-        Uses the sample form, matching how a five-run spread is normally quoted,
-        and is ``0.0`` rather than undefined for a single run.
-        """
-        values = self.scores
-        if values.size < 2:
-            return 0.0
-        return float(values.std(ddof=1))
+    @property
+    def mean_unrounded(self) -> float:
+        """The plain mean of the raw scores, for anyone who wants it."""
+        return float(self.scores.mean()) if self.runs else float("nan")
 
     @property
     def comparable(self) -> bool:
@@ -152,8 +162,12 @@ class OfficialResult:
         return {
             "endpoint": self.key,
             "metric": self.metric,
-            "mean": self.mean,
-            "sd": self.sd,
+            # `null` rather than NaN when nothing completed: NaN is not JSON, and a
+            # standard parser has to be able to read a failure report.
+            "mean": self.mean if self.runs else None,
+            "sd": self.sd if self.runs else None,
+            "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+            "mean_unrounded": self.mean_unrounded if self.runs else None,
             "n_seeds": len(self.runs),
             "seeds": [r.to_dict() for r in self.runs],
             "failures": self.failures,

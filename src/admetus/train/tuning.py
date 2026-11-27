@@ -87,10 +87,12 @@ class TuneResult:
     time_budget: int | None
     boosters: list[Any] = field(default_factory=list)
     tuned_keys: list[str] = field(default_factory=list)
-    #: The tuner raised partway through and this fold fell back to the best trial it
-    #: had completed. Recorded in the bundle, because a fold tuned less than the
-    #: others is something a reader should be told rather than left to infer.
+    #: The tuner could not hand back its own booster and this fold was rebuilt.
+    #: Recorded in the bundle, because a fold fitted differently from its neighbours
+    #: is something a reader should be told rather than left to infer.
     tuner_failed: bool = False
+    #: Where the rebuilt fold's parameters came from, when it was rebuilt.
+    rebuilt_from: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """The record stored in the bundle."""
@@ -107,6 +109,7 @@ class TuneResult:
             # numbers come from the held-out 20%.
             "cv_score_biased": True,
             "tuner_failed": self.tuner_failed,
+            "rebuilt_from": self.rebuilt_from or None,
             "search_space_owner": "tuner",
             "feature_fraction_grid_floor": 0.4,
         }
@@ -206,7 +209,16 @@ def _direction(metric: str) -> str:
     return "maximize" if metric in MAXIMIZE_METRICS else "minimize"
 
 
-def _fallback_fit(
+#: Study attribute holding the full parameter set the tuner settled on. The tuner
+#: searches in stages and a trial records only the stage it varied -- the winning
+#: `ames` trial's params are `bagging_fraction` and `bagging_freq` alone, with
+#: `feature_fraction` and the rest set in earlier stages and recorded nowhere. So the
+#: full set is written here after a successful run, because without it a rebuild
+#: silently drops every stage but the last.
+BEST_PARAMS_ATTR = "admetus_best_params"
+
+
+def _rebuild_fold(
     lgb,
     x_train,
     y_train,
@@ -216,21 +228,38 @@ def _fallback_fit(
     study: Any,
     seed: int,
     time_budget: int | None,
+    reason: str,
 ) -> TuneResult:
-    """Fit one fold when the tuner could not finish, using the best trial it had."""
+    """Fit one fold from the best parameters the study recorded.
+
+    Used when the tuner cannot hand back a booster: it raised partway through, or the
+    study was resumed in a fresh model directory and the winning booster is not on
+    disk. The score reported is the **refitted booster's own** validation score, not
+    the trial's: a rebuild from partial parameters does not reach the trial's number,
+    and recording the trial's would overstate what shipped.
+    """
     import optuna
 
     completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
     merged = dict(params)
-    score = float("nan")
-    if completed:
+    recorded = study.user_attrs.get(BEST_PARAMS_ATTR)
+    if recorded:
+        merged.update(recorded)
+        source = "the full parameters recorded for the study"
+    elif completed:
         best_trial = min(
             completed,
             key=lambda t: t.value if study.direction == optuna.study.StudyDirection.MINIMIZE
             else -t.value,
         )
         merged.update(best_trial.params)
-        score = float(best_trial.value)
+        source = (
+            f"trial {best_trial.number}'s own parameters only, because no full set was "
+            "recorded for this study; earlier stages' choices are lost"
+        )
+    else:
+        source = "the fixed parameters, because the study holds no completed trial"
+    log.warning("rebuilding this fold from %s (%s)", source, reason)
 
     fit_set = lgb.Dataset(x_train, label=y_train, params=merged, free_raw_data=False)
     valid_set = lgb.Dataset(
@@ -243,15 +272,18 @@ def _fallback_fit(
         valid_sets=[valid_set],
         callbacks=[lgb.early_stopping(TUNER_EARLY_STOPPING, verbose=False)],
     )
+    metric = str(merged.get("metric", ""))
+    achieved = (booster.best_score or {}).get("valid_0", {}).get(metric)
     return TuneResult(
         params=merged,
-        score=score,
+        score=float(achieved) if achieved is not None else float("nan"),
         n_trials=len(completed),
         seed=seed,
         time_budget=time_budget,
         boosters=[booster],
         tuned_keys=sorted(k for k in merged if k not in params),
         tuner_failed=True,
+        rebuilt_from=source,
     )
 
 
@@ -265,6 +297,7 @@ def tune_fold(
     time_budget: int | None = DEFAULT_TIME_BUDGET_SECONDS,
     storage: Path | None = None,
     study_name: str = "admetus",
+    model_dir: Path | None = None,
 ) -> TuneResult:
     """Tune and fit **one** fold, returning the model the tuner settled on.
 
@@ -290,6 +323,10 @@ def tune_fold(
         time_budget: Wall-clock cap for this fold, in seconds.
         storage: SQLite path for a resumable study.
         study_name: Study name inside the storage.
+        model_dir: Where the tuner persists the winning booster. Without it, the
+            booster lives only in the memory of the process that found it, so a
+            resumed study has trials and no model -- which failed the run outright
+            rather than rebuilding.
 
     Returns:
         A :class:`TuneResult` whose single booster is this fold's model.
@@ -322,10 +359,14 @@ def tune_fold(
         x_valid, label=y_valid, reference=fit_set, params=params, free_raw_data=False
     )
 
+    if model_dir is not None:
+        Path(model_dir).mkdir(parents=True, exist_ok=True)
+
     tuner = LightGBMTuner(
         dict(params),
         fit_set,
         valid_sets=[valid_set],
+        model_dir=str(model_dir) if model_dir else None,
         num_boost_round=TUNER_MAX_ROUNDS,
         callbacks=[lgb.early_stopping(TUNER_EARLY_STOPPING, verbose=False)],
         time_budget=time_budget,
@@ -346,8 +387,9 @@ def tune_fold(
             "the tuner failed after %d completed trial(s) (%s: %s); falling back to the best "
             "of those", len(completed), type(exc).__name__, exc,
         )
-        return _fallback_fit(
-            lgb, x_train, y_train, x_valid, y_valid, params, study, seed, time_budget
+        return _rebuild_fold(
+            lgb, x_train, y_train, x_valid, y_valid, params, study, seed, time_budget,
+            reason=f"the tuner raised {type(exc).__name__}: {exc}",
         )
 
     best = dict(params)
@@ -355,12 +397,18 @@ def tune_fold(
         k for k, v in tuner.best_params.items() if k not in params or params[k] != v
     )
     best.update(tuner.best_params)
+    # Written while the full set is in hand. A trial records only the stage it
+    # varied, so this is the only place the whole winning set exists.
+    study.set_user_attr(BEST_PARAMS_ATTR, dict(tuner.best_params))
 
-    boosters: list[Any] = []
     try:
-        boosters = [tuner.get_best_booster()]
-    except Exception as exc:  # pragma: no cover - only if the tuner kept nothing
-        log.warning("the tuner returned no booster for this fold (%s)", exc)
+        booster = tuner.get_best_booster()
+    except Exception as exc:  # noqa: BLE001 - the booster is not on disk
+        return _rebuild_fold(
+            lgb, x_train, y_train, x_valid, y_valid, params, study, seed, time_budget,
+            reason=f"the tuner could not return its booster ({type(exc).__name__}: {exc})",
+        )
+    boosters = [booster]
 
     completed = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
     return TuneResult(

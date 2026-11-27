@@ -72,6 +72,17 @@ def held_out_table(models_dir: Path, official_only: bool = False) -> str:
             continue
         meta = read_metadata(models_dir / endpoint.key)
         primary = (meta.get("metrics") or {}).get("primary") or {}
+        split = str((meta.get("provenance") or {}).get("split", "unrecorded"))
+        # A score from another split does not belong in this column. A partially
+        # retrained directory used to publish scaffold and random holdouts together,
+        # so DILI's 0.8342 -- measured on a scaffold split -- appeared under
+        # "random 20%".
+        if not split.startswith("random"):
+            lines.append(
+                f"| `{endpoint.key}` | {task} | {endpoint.metric} | - | - | - |"
+                f"  <!-- omitted: measured on {split} -->"
+            )
+            continue
         lines.append(
             f"| `{endpoint.key}` | {task} | {endpoint.metric} | "
             f"{_format(primary.get('value'), endpoint.metric)} | "

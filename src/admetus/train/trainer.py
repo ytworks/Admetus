@@ -148,6 +148,13 @@ def train_endpoint(
                 f"{split.test.size} evaluation rows, so nothing can be measured"
             )
         split_kind = "given (published benchmark split)"
+        # The published training rows arrive in file order, and `cv_folds` cuts
+        # contiguous blocks, so without this every seed validated on exactly the same
+        # compounds: five DILI seeds gave identical folds, and the five-seed spread
+        # reported none of the fold variation the protocol is asking for. The test
+        # rows stay exactly as published.
+        shuffled = np.random.default_rng(seed).permutation(split.train.size)
+        split = splits.Split(train=split.train[shuffled], test=split.test)
     train_rows = split.train
     test_rows = split.test
 
@@ -196,6 +203,7 @@ def train_endpoint(
                 params, seed=seed, time_budget=time_budget,
                 storage=tuning.study_path(models_dir, endpoint.key) if models_dir else None,
                 study_name=study,
+                model_dir=tuning.booster_dir(models_dir, study) if models_dir else None,
             )
             if not tuned.boosters:
                 raise InputDataError(

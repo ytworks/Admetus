@@ -42,8 +42,8 @@ log = get_logger("cli.train")
 )
 @click.option(
     "--time-budget", type=int, default=None,
-    help="Wall-clock cap for tuning one endpoint, in seconds. The tuner's trial count is "
-         "effectively fixed, so this is how a long run is bounded.",
+    help="Wall-clock cap for tuning ONE FOLD, in seconds. Each fold is tuned separately, so "
+         "an endpoint costs this many times --folds.",
 )
 @click.option(
     "--tune/--no-tune", default=True, show_default=True,
@@ -194,21 +194,24 @@ def evaluate_command(
             # `mcc_at_best_threshold`, which was chosen by searching the held-out
             # labels. Reporting it unlabelled invites reading an oracle's score as
             # the model's: on hERG it reads 0.63 where the shipped cutoff gives 0.56.
-            legacy_mcc = (
-                "mcc" not in metrics and "mcc_at_best_threshold" in metrics
-            )
+            # The current trainer ships probabilities and no operating threshold, so
+            # `mcc_at_best_threshold` with no `mcc` is the normal state, not a stale
+            # record. Telling the operator to retrain was wrong: another full run
+            # produces exactly the same fields.
+            retrospective_mcc = "mcc_at_best_threshold" in metrics
             rows.append({
                 "endpoint": endpoint.key,
                 "metric": endpoint.metric,
                 "in_official_group": endpoint.in_official_group,
                 "primary": metrics.get("primary"),
                 "all_metrics": {k: v for k, v in metrics.items() if k != "primary"},
-                "mcc_is_retrospective_only": legacy_mcc,
+                "mcc_is_retrospective_only": retrospective_mcc,
                 "mcc_note": (
-                    "this bundle predates evaluation at the shipped cutoff, so its only MCC was "
-                    "chosen by searching the held-out labels and is not a score this model can "
-                    "deliver. Retrain to record MCC at the cutoff the bundle ships."
-                ) if legacy_mcc else None,
+                    "mcc_at_best_threshold was obtained by searching the held-out labels for the "
+                    "cutoff that maximizes it, so it is a retrospective diagnostic and not a "
+                    "score this model can deliver: no operating threshold ships, because the "
+                    "reference implementation reports probabilities and chooses none."
+                ) if retrospective_mcc else None,
                 "cv_score_biased": (meta.get("cross_validation") or {}).get("cv_score_biased", True),
                 "low_confidence": metrics.get("low_confidence"),
             })
@@ -246,7 +249,7 @@ def evaluate_command(
             )
             notes = []
             if row["mcc_is_retrospective_only"]:
-                notes.append("MCC is retrospective only")
+                notes.append("MCC retrospective (threshold picked on the test labels)")
             if row["low_confidence"]:
                 notes.append("small dataset")
             if not row["in_official_group"]:

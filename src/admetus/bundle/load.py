@@ -159,6 +159,39 @@ def _boosters_load(directory: Path) -> list[str]:
     return [] if answer.get("ok") else list(answer.get("problems") or ["the boosters do not load"])
 
 
+#: Record fields that name post-processing this install no longer performs. A bundle
+#: carrying any of them was trained by a version that mapped its model's output
+#: before reporting it, and serving it here would publish the wrong number in the
+#: wrong unit -- a VDss bundle's log10 output read as L/kg, which is 0.26 reported as
+#: -0.58. There is no migration: the mapping code is gone, so such a bundle is
+#: refused and has to be retrained.
+RETIRED_POST_PROCESSING = (
+    ("transform", lambda v: bool(v) and v.get("name") not in (None, "identity")),
+    ("calibrator", lambda v: v is not None),
+    ("decision_threshold", lambda v: v is not None),
+    ("interval", lambda v: v is not None),
+    ("applicability_domain", lambda v: bool(v)),
+)
+
+
+def retired_post_processing(meta: dict[str, Any]) -> list[str]:
+    """Name the post-processing steps a bundle records that this install cannot do."""
+    found = []
+    for field, is_set in RETIRED_POST_PROCESSING:
+        value = meta.get(field)
+        if field == "transform" and value is None:
+            continue
+        try:
+            if is_set(value):
+                found.append(field)
+        except AttributeError:  # pragma: no cover - a record of another shape
+            found.append(field)
+    endpoint = meta.get("endpoint") or {}
+    if endpoint.get("output_range"):
+        found.append("endpoint.output_range")
+    return found
+
+
 def verify(
     directory: Path, check_fingerprint: bool = True, check_boosters: bool = True
 ) -> tuple[bool, list[str]]:
@@ -190,11 +223,21 @@ def verify(
     except ModelError as exc:
         return False, [str(exc)]
 
+    retired = retired_post_processing(meta)
+    if retired:
+        problems.append(
+            "this bundle records post-processing that this install no longer performs "
+            f"({', '.join(retired)}). Serving it would report the model's own output as though "
+            "it had been mapped back to the published scale, which is wrong by whatever the "
+            "mapping did. Retrain the endpoint: 'admetus train --endpoint "
+            f"{Path(directory).name} --force'."
+        )
+
     featurizer = meta.get("featurizer") or {}
     try:
         spec = FeaturizerSpec.from_dict(featurizer["spec"])
     except (KeyError, ValueError) as exc:
-        return False, [f"featurizer spec is unusable: {exc}"]
+        return False, [*problems, f"featurizer spec is unusable: {exc}"]
 
     if spec.spec_sha256 != featurizer.get("spec_sha256"):
         problems.append("featurizer spec digest does not match the spec recorded beside it")
@@ -306,4 +349,12 @@ def available(models_dir: Path) -> list[str]:
     return sorted(p.name for p in models_dir.iterdir() if (p / BUNDLE_FILE).is_file())
 
 
-__all__ = ["LoadedModel", "available", "load", "read_metadata", "verify"]
+__all__ = [
+    "RETIRED_POST_PROCESSING",
+    "LoadedModel",
+    "available",
+    "load",
+    "read_metadata",
+    "retired_post_processing",
+    "verify",
+]

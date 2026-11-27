@@ -16,19 +16,36 @@ machinery that has since been removed, so they were deleted rather than relabell
 ## What the additions cost, measured
 
 The pipeline was built as the reference implementation plus a series of additions,
-each with a plausible argument behind it and none of them requested. This is what
-they cost, measured on `carcinogens` -- 280 compounds, 21% positive, whose reference
-figure is a held-out ROC-AUC of 0.8646:
+each with a plausible argument behind it and none of them requested. Two of them were
+measured on identical predictions, which is the only comparison that isolates an
+effect; the rest are recorded as separate runs, because their evaluation compounds
+differ and subtracting across them would attribute a split change to a model change.
 
-| Configuration | ROC-AUC |
+**On identical predictions.** Held-out ROC-AUC for `carcinogens`, random seed-0
+holdout, 56 test rows, from one trained model:
+
+| | ROC-AUC |
 |---|---|
-| With probability calibration, column pruning and a scaffold-grouped split | 0.249 |
-| Calibration removed | 0.751 |
-| Pruning removed, and tuning moved to one run per fold | 0.885 |
-| *The reference implementation's own figure* | *0.865* |
+| Raw ensemble mean | **0.7506** |
+| After the Platt calibrator | **0.2494** |
 
-The additions were costing **0.64 of ROC-AUC**, and the largest single piece of that
-was the calibrator inverting the ranking.
+That is the same numbers through two output paths, so the 0.50 is the calibrator and
+nothing else. 0.2494 is 1 - 0.7506, the signature of a reversed ranking.
+
+**Separate runs, separate evaluation sets.** These are not differences; each row is
+its own run and the compounds scored are not the same:
+
+| Run | Evaluation set | ROC-AUC |
+|---|---|---|
+| Calibration + pruning + scaffold-grouped split | scaffold holdout, 55 rows | 0.249 |
+| Calibration removed, pruning and scaffold split kept | scaffold holdout, 55 rows | 0.751 |
+| Reference implementation followed: random holdout, no pruning, per-fold tuning | random seed-0 holdout, 56 rows | 0.885 |
+| *The reference implementation's own figure* | *its own holdout, 56 rows* | *0.865* |
+
+The first two share an evaluation set and so can be compared with each other; the
+third cannot be subtracted from either. What the table supports is that the finished
+pipeline reaches the reference's figure, and that the calibrator alone cost half of
+ROC-AUC on the predictions it was applied to.
 
 ### How a calibrator inverts a ranking
 

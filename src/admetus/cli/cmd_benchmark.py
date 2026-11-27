@@ -111,7 +111,8 @@ def fetch_command(ctx: click.Context, data_dir: Path | None, overwrite: bool, as
 )
 @click.option(
     "--time-budget", type=int, default=None,
-    help="Wall-clock cap for tuning one seed, in seconds. Five seeds cost five of these.",
+    help="Wall-clock cap for tuning ONE FOLD, in seconds. An endpoint costs this many "
+         "times folds times seeds: at the default 3 folds and 5 seeds, 15 of them.",
 )
 @click.option("--jobs", type=int, default=0, help="LightGBM threads. 0 lets LightGBM decide.")
 @click.option(
@@ -196,7 +197,16 @@ def run_command(
         elif failed:
             for entry in failed:
                 click.echo(f"FAILED {entry['endpoint']}: {entry['error']}", err=True)
-        if failed:
+        # A seed that did not complete is a failure of the request, whichever list it
+        # landed in. Checking only the outer list reported ok:false and exited 0.
+        short = [r for r in results if r["n_seeds"] != len(chosen_seeds)]
+        if failed or short:
+            for entry in short:
+                click.echo(
+                    f"INCOMPLETE {entry['endpoint']}: {entry['n_seeds']} of "
+                    f"{len(chosen_seeds)} seed(s) completed",
+                    err=True,
+                )
             raise SystemExit(2)
 
     run_guarded(body, as_json=as_json)

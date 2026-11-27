@@ -317,8 +317,12 @@ a point estimate (`low_confidence`).
 
 - **No published models yet.** Train locally.
 - **2D only.** No conformer generation, so stereochemistry is invisible to the model. Enantiomers
-  receive identical predictions, and the training pipeline treats them as duplicates deliberately
-  rather than pretending otherwise.
+  receive identical predictions.
+- **The held-out score is a held-out-row score, not an unseen-structure score.** Rows are split as
+  published, duplicates and all, as the reference implementation does. So a molecule can appear on
+  both sides: on Caco-2 at seed 0, **26 of the 182 test rows have a feature vector identical to a
+  training row**. Read the number as "how well it does on rows it was not fitted on", which is
+  what the reference measures, and not as "how well it does on chemistry it has never seen".
 - **No applicability-domain flag.** There was one; measured, it carried no information at 16 of
   the 29 endpoints, so it was removed rather than left looking like a safeguard. Nothing in the
   output says whether a molecule resembles the training set, so a caller working outside

@@ -445,3 +445,36 @@ def test_an_archive_whose_bundle_is_for_another_endpoint_is_refused(tmp_path):
     assert results[0]["installed"] is False
     assert "not 'herg'" in results[0]["problems"][0]
     assert not (tmp_path / "installed" / "herg").exists()
+
+
+def test_a_bundle_recording_retired_post_processing_is_refused(tmp_path):
+    """A bundle whose output was mapped before reporting cannot be served here.
+
+    A pre-refactor VDss bundle records a log10 transform. Serving it with the current
+    code printed -0.583615 where its own record means 0.260846 L/kg -- the model's own
+    output read as though it were the published scale. The mapping code is gone, so
+    there is no migration and the bundle is refused by name.
+    """
+    import json as _json
+
+    from admetus.bundle.load import retired_post_processing, verify
+
+    models = tmp_path / "models"
+    directory = make_bundle(models)
+    record = _json.loads((directory / "bundle.json").read_text())
+    record["transform"] = {"name": "log10_safe", "floor": 0.005}
+    (directory / "bundle.json").write_text(_json.dumps(record), encoding="utf-8")
+
+    assert retired_post_processing(record) == ["transform"]
+    ok, problems = verify(directory, check_fingerprint=False)
+    assert not ok
+    assert any("no longer performs" in p and "transform" in p for p in problems)
+    assert any("--force" in p for p in problems)
+
+
+def test_an_identity_transform_bundle_is_still_usable(tmp_path):
+    """What the current trainer writes has to keep passing."""
+    from admetus.bundle.load import retired_post_processing
+
+    assert retired_post_processing({"transform": {"name": "identity"}}) == []
+    assert retired_post_processing({"transform": None}) == []

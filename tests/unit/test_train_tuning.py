@@ -239,3 +239,52 @@ def test_a_study_is_named_after_the_settings_its_trials_depend_on():
     assert base != study_name("dili", "morgan_p2", 1632, 3, auroc)          # fold count
     assert base != study_name("dili", "morgan_p2", 1632, 5, other)          # objective
     assert base != study_name("herg", "morgan_p2", 1632, 5, auroc)          # endpoint
+
+
+def test_the_full_winning_parameter_set_is_recorded_for_rebuilds():
+    """A trial records only the stage it varied, so the whole set must be stored.
+
+    The winning `ames` trial's `params` are `bagging_fraction` and `bagging_freq`
+    alone; `feature_fraction` and the rest were fixed in earlier stages and recorded
+    nowhere. Rebuilding from the trial alone silently drops them, which on DILI fold
+    1 gave validation binary error 0.173228 where the winner scored 0.149606.
+    """
+    assert tuning.BEST_PARAMS_ATTR == "admetus_best_params"
+
+
+@pytest.mark.slow
+def test_a_resumed_study_still_yields_a_usable_booster(tmp_path):
+    """Copying a study into a fresh model directory must not fail the run.
+
+    The boosters live beside the study, so a study moved on its own has trials and no
+    model. `get_best_booster` then raises and the endpoint used to exit 2. It now
+    rebuilds from the recorded parameters and says so.
+    """
+    import shutil
+
+    matrix, y = toy()
+    params = tuning.fixed_params("classification", "auroc", num_threads=2)
+    fold = folds_of(matrix.shape[0])[0]
+
+    first = tuning.tune_fold(
+        matrix[fold.train], y[fold.train], matrix[fold.test], y[fold.test],
+        params, seed=0, time_budget=15,
+        storage=tmp_path / "s.sqlite", study_name="s",
+        model_dir=tmp_path / "s-boosters",
+    )
+    assert first.boosters and not first.tuner_failed
+
+    # The study alone, as if it had been copied to another machine.
+    moved = tmp_path / "moved"
+    moved.mkdir()
+    shutil.copy(tmp_path / "s.sqlite", moved / "s.sqlite")
+    second = tuning.tune_fold(
+        matrix[fold.train], y[fold.train], matrix[fold.test], y[fold.test],
+        params, seed=0, time_budget=5,
+        storage=moved / "s.sqlite", study_name="s",
+        model_dir=moved / "s-boosters",
+    )
+    assert second.boosters, "a resumed study must still produce a model"
+    assert second.boosters[0].predict(matrix[:3]).shape == (3,)
+    if second.tuner_failed:
+        assert "full parameters recorded" in second.rebuilt_from

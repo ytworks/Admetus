@@ -139,8 +139,11 @@ endpoints:
     expected_rows: 1614
     notes: >-
       The published file carries several species. Only human rows are used, which
-      is also what the benchmark group does. Predictions are clamped to 0-100
-      because the target is bounded and the metric is MAE.
+      is also what the benchmark group does. The target is bounded at 0-100 but
+      predictions are NOT clamped: the reference implementation reports the raw
+      ensemble mean, so a value slightly outside the range is possible and has been
+      observed (103.1% for CHEMBL1818187). Clamp it yourself if your caller needs
+      the bound.
     description: Plasma protein binding rate.
 
   - key: vdss
@@ -153,9 +156,10 @@ endpoints:
     in_official_group: true
     expected_rows: 1130
     notes: >-
-      Spans roughly 0.01 to 700 L/kg. Trained in log10 space so the loss is not
-      dominated by a handful of high-volume compounds. Spearman is rank-based, so
-      the transform does not change the metric.
+      Spans roughly 0.01 to 700 L/kg, and is trained and predicted on that raw
+      scale: no log transform, as the reference implementation does none. The loss
+      is therefore dominated by the high-volume compounds, which is a property of
+      the arrangement rather than an oversight.
     description: Volume of distribution at steady state.
 
   # ---------------------------------------------------------------- metabolism
@@ -263,8 +267,8 @@ endpoints:
     in_official_group: true
     expected_rows: 667
     notes: >-
-      Spans roughly 0.065 to 1200 hours. Trained in log10 space for the same
-      reason as vdss.
+      Spans roughly 0.065 to 1200 hours, trained and predicted on that raw scale
+      with no log transform, as with vdss.
     description: Terminal half-life.
 
   - key: clearance_hepatocyte
@@ -277,8 +281,9 @@ endpoints:
     in_official_group: true
     expected_rows: 1213
     notes: >-
-      Contains values at or below the limit of quantification, so the transform
-      floors at half the smallest positive value rather than taking log10(0).
+      Contains values at or below the limit of quantification. They are used as
+      published: there is no transform and so no floor, and a prediction can fall
+      below the quantification limit.
     description: Hepatocyte intrinsic clearance.
 
   - key: clearance_microsome
