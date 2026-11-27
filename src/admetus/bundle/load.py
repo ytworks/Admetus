@@ -94,8 +94,8 @@ def read_metadata(directory: Path) -> dict[str, Any]:
     path = Path(directory) / BUNDLE_FILE
     if not path.is_file():
         raise ModelError(
-            f"no model bundle at {directory}. Run 'admetus models pull' or "
-            f"'admetus train --endpoint {Path(directory).name}'."
+            f"no model bundle at {directory}. "
+            f"Train one with 'admetus train --endpoint {Path(directory).name}'."
         )
     try:
         return json.loads(path.read_text(encoding="utf-8"))

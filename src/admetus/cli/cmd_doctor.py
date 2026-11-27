@@ -163,7 +163,7 @@ def doctor_command(ctx: click.Context, as_json: bool, models_dir: Path | None) -
                 f"models     {len(present)} of {len(registry)} available in {directory}"
             )
             if not present:
-                click.echo("           fetch them with: admetus models pull --all")
+                click.echo("           train one with: admetus train --endpoint dili")
         if code != EXIT_OK:
             raise SystemExit(code)
 

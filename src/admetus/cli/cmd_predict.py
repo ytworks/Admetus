@@ -104,7 +104,8 @@ def predict_command(
         if not present:
             raise ModelError(
                 f"no model bundles in {directory}. Train one with "
-                "'admetus train --endpoint dili', or set --models-dir."
+                "'admetus train --endpoint dili', or point --models-dir at a directory "
+                "that has them."
             )
 
         selected = resolve_keys(endpoints, select_all)
