@@ -1,17 +1,20 @@
 # Benchmarks
 
 Everything here is measured, not estimated. Reproduce the featurization numbers with
-`scripts/bench_featurize.py`, the accuracy tables with `scripts/benchmark_tables.py`,
-and the feature-set study with `scripts/feature_set_study.py`.
+`scripts/bench_featurize.py` and the accuracy tables with
+`scripts/benchmark_tables.py`. The feature-set study that used to be named here went
+with the feature-set machinery: there is one feature space now, so there is nothing
+to study.
 
 Measurement host: Apple Silicon (arm64), 10 cores (4 performance + 6 efficiency),
 16 GB RAM, macOS, Python 3.12.13, RDKit 2026.09.2, NumPy 2.5.5.
 
 ## Accuracy
 
-Being regenerated. Every figure measured before this point described a pipeline with
-machinery that has since been removed, so they were deleted rather than relabelled.
-`python scripts/benchmark_tables.py` rebuilds the tables from the bundles.
+Per-endpoint numbers live in the READMEs' benchmark section, not here, so there is one
+copy to keep right: `scripts/benchmark_tables.py` generates them from the bundles and
+CI compares every numeric cell between the two documents. What is here is the
+engineering measurement and the cost of each thing that was removed.
 
 ## What the additions cost, measured
 
