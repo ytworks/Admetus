@@ -9,6 +9,7 @@ import click
 from admetus.bundle.load import available, read_metadata, verify
 from admetus.cli.options import (
     all_option,
+    cache_root,
     default_models_dir,
     emit,
     endpoint_option,
@@ -17,7 +18,7 @@ from admetus.cli.options import (
     run_guarded,
     setup_logging,
 )
-from admetus.errors import EXIT_NO_MODEL
+from admetus.errors import EXIT_NO_MODEL, UsageError
 
 
 @click.group("models")
@@ -122,6 +123,108 @@ def show_command(
             import json as _json
 
             click.echo(_json.dumps(records, indent=2, sort_keys=True, default=str))
+
+    run_guarded(body, as_json=as_json)
+
+
+@models_group.command("package")
+@endpoint_option
+@models_dir_option
+@click.option(
+    "--out", type=click.Path(path_type=Path), required=True,
+    help="Where to write the archives and the manifest.",
+)
+@json_option
+@click.pass_context
+def package_command(
+    ctx: click.Context, endpoints: tuple[str, ...], models_dir: Path | None,
+    out: Path, as_json: bool,
+) -> None:
+    """Package local bundles for release, with a manifest.
+
+    One reproducible '.tar.gz' per endpoint plus 'models-manifest.json', which
+    carries the digest of every archive and of every file inside it. Upload the
+    whole directory as the assets of a release; 'admetus models pull' reads it.
+
+    A bundle that does not verify is refused rather than published.
+    """
+    setup_logging(ctx)
+
+    def body() -> None:
+        from admetus.bundle.manifest import MANIFEST_FILE, build
+
+        directory = Path(models_dir or default_models_dir())
+        manifest = build(directory, Path(out), keys=list(endpoints) or None)
+        if as_json:
+            emit({"ok": True, "out": str(out), "manifest": manifest})
+        else:
+            total = sum(b["archive_bytes"] for b in manifest["bundles"])
+            for entry in manifest["bundles"]:
+                click.echo(f"{entry['endpoint']:<22} {entry['archive_bytes']:>10,} bytes  {entry['archive']}")
+            click.echo(f"\n{manifest['n_bundles']} archive(s), {total:,} bytes, and {MANIFEST_FILE} in {out}")
+
+    run_guarded(body, as_json=as_json)
+
+
+@models_group.command("pull")
+@endpoint_option
+@all_option
+@models_dir_option
+@click.option(
+    "--from", "source", default=None, metavar="URL_OR_PATH",
+    help="Manifest to install from. Defaults to the latest release's manifest.",
+)
+@click.option("--overwrite", is_flag=True, help="Reinstall endpoints that already have a bundle.")
+@json_option
+@click.pass_context
+def pull_command(
+    ctx: click.Context, endpoints: tuple[str, ...], select_all: bool,
+    models_dir: Path | None, source: str | None, overwrite: bool, as_json: bool,
+) -> None:
+    """Download published model bundles and install them.
+
+    Every archive is checked against the digest the manifest records before it is
+    unpacked, and the installed bundle then goes through the same verification the
+    loader applies -- so a bundle built against a different feature space fails here
+    rather than at prediction time.
+
+    No release has been published yet, so this reports a download failure until one
+    exists. Train locally with 'admetus train' in the meantime.
+    """
+    setup_logging(ctx)
+
+    def body() -> None:
+        from admetus.bundle.manifest import DEFAULT_MANIFEST_URL, install, read_manifest
+
+        if not endpoints and not select_all:
+            raise UsageError("no endpoint selected; pass --endpoint KEY (repeatable) or --all")
+        directory = Path(models_dir or default_models_dir())
+        cache = cache_root() / "downloads"
+        cache.mkdir(parents=True, exist_ok=True)
+        where = source or DEFAULT_MANIFEST_URL
+        manifest, base = read_manifest(where, cache)
+        results = install(
+            manifest, base, directory, cache,
+            keys=None if select_all else list(endpoints),
+            overwrite=overwrite,
+        )
+        failed = [r for r in results if r.get("ok") is False]
+        payload = {
+            "ok": not failed,
+            "source": where,
+            "models_dir": str(directory),
+            "manifest_created_at": manifest.get("created_at"),
+            "n_installed": sum(1 for r in results if r["installed"]),
+            "results": results,
+        }
+        if as_json:
+            emit(payload)
+        else:
+            for entry in results:
+                click.echo(f"{entry['endpoint']:<22} {entry['reason']}")
+            click.echo(f"\n{payload['n_installed']} bundle(s) installed into {directory}")
+        if failed:
+            raise SystemExit(EXIT_NO_MODEL)
 
     run_guarded(body, as_json=as_json)
 
