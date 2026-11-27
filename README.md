@@ -271,14 +271,71 @@ Three things worth knowing before reading several columns together:
 
 ## Benchmark
 
-Accuracy numbers go here once the models have been trained, measured on a held-out scaffold split
-with a bootstrap confidence interval, together with the official five-seed protocol for the 22
-benchmark-group endpoints. They are deliberately absent rather than estimated.
+All 29 endpoints are trained. Two columns, measuring different things:
 
-Engineering measurements are in [docs/benchmark.md](docs/benchmark.md) and are real: fingerprint
-cost per molecule by molecule size, end-to-end featurization throughput, the pruning and
-column-slicing costs, scaffold-grouping statistics, and the feature-level leakage found in the
-published splits.
+- **Held-out** is this project's own scaffold split, looked at once, with a bootstrap
+  interval. The largest scaffold groups go to training, so the held-out set is the
+  unusual chemistry on purpose and the estimate is pessimistic.
+- **Official protocol** is the benchmark group's published split: trained on its
+  `train_val` portion, scored once per seed on its test set, mean and standard
+  deviation over the protocol's five seeds. This is the column comparable with the
+  published leaderboard, and it covers the 22 endpoints of the official group.
+  **Taken with tuning off**, because five seeds is five tuning runs, so it is a floor
+  rather than a best effort.
+
+| Endpoint | Metric | Held-out (95% CI) | Official protocol | Notes |
+|---|---|---|---|---|
+| `caco2` | mae | 0.3786 [0.3344, 0.4237] | 0.3084 +/- 0.0030 |  |
+| `pampa` | auroc | 0.7204 [0.6353, 0.8013] | no published split |  |
+| `hia` | auroc | 0.8930 [0.7339, 1.0000] | 0.9806 +/- 0.0018 | small test set |
+| `pgp` | auroc | 0.8919 [0.8462, 0.9306] | 0.9283 +/- 0.0016 |  |
+| `bioavailability` | auroc | 0.6736 [0.5629, 0.7859] | 0.7233 +/- 0.0048 |  |
+| `lipophilicity` | mae | 0.6633 [0.6261, 0.6990] | 0.6808 +/- 0.0008 | tuning budget-limited |
+| `solubility` | mae | 1.3225 [1.2648, 1.3809] | 1.1850 +/- 0.0027 | tuning budget-limited |
+| `bbb` | auroc | 0.8607 [0.8146, 0.9039] | 0.8774 +/- 0.0035 |  |
+| `ppbr` | mae | 9.1137 [7.8984, 10.3877] | 7.7789 +/- 0.0362 |  |
+| `vdss` | spearman | 0.6435 [0.5522, 0.7217] | 0.6116 +/- 0.0041 |  |
+| `cyp2c9_veith` | auprc | 0.7133 [0.6797, 0.7454] | 0.7234 +/- 0.0013 | tuning budget-limited |
+| `cyp2d6_veith` | auprc | 0.7357 [0.7021, 0.7673] | 0.6611 +/- 0.0023 | tuning budget-limited |
+| `cyp3a4_veith` | auprc | 0.7910 [0.7655, 0.8142] | 0.8274 +/- 0.0012 | tuning budget-limited |
+| `cyp1a2_veith` | auprc | 0.8654 [0.8488, 0.8819] | no published split | tuning budget-limited |
+| `cyp2c19_veith` | auprc | 0.7971 [0.7724, 0.8199] | no published split | tuning budget-limited |
+| `cyp2c9_substrate` | auprc | 0.2491 [0.1477, 0.3892] | 0.3627 +/- 0.0062 | interval reaches the base rate |
+| `cyp2d6_substrate` | auprc | 0.5038 [0.3780, 0.6707] | 0.6895 +/- 0.0114 |  |
+| `cyp3a4_substrate` | auroc | 0.6507 [0.5529, 0.7409] | 0.6537 +/- 0.0061 |  |
+| `half_life` | spearman | 0.1982 [0.0259, 0.3578] | 0.5353 +/- 0.0091 |  |
+| `clearance_hepatocyte` | spearman | 0.3804 [0.2533, 0.5000] | 0.3843 +/- 0.0060 |  |
+| `clearance_microsome` | spearman | 0.3869 [0.2671, 0.4913] | 0.5580 +/- 0.0057 |  |
+| `ld50` | mae | 0.5227 [0.4970, 0.5473] | 0.7075 +/- 0.0005 | tuning budget-limited |
+| `herg` | auroc | 0.8758 [0.8013, 0.9413] | 0.8470 +/- 0.0045 |  |
+| `herg_karim` | auroc | 0.8558 [0.8417, 0.8695] | no published split | tuning budget-limited |
+| `ames` | auroc | 0.7992 [0.7760, 0.8212] | 0.7741 +/- 0.0015 |  |
+| `dili` | auroc | 0.8338 [0.7493, 0.9102] | 0.9023 +/- 0.0037 | small test set |
+| `carcinogens` | auprc | 0.8101 [0.6002, 0.9453] | no published split | small test set |
+| `skin_reaction` | auroc | 0.6245 [0.4951, 0.7485] | no published split | small test set, interval reaches no signal |
+| `tox21_nr_ar` | auprc | 0.5198 [0.4067, 0.6280] | no published split |  |
+
+Read before quoting a number:
+
+- **The standard deviation over seeds is not comparable with the leaderboard's.** Here
+  the seed moves only the fold assignment inside the training portion; `train_val` is
+  not resampled into train and valid. The mean is comparable, the spread is not.
+- **Which split is harder depends on the endpoint, in both directions.** The official
+  split is easier at `half_life`, `clearance_microsome` and `cyp2d6_substrate`, and
+  harder at `ld50` and `vdss`.
+- **Nine endpoints are budget-limited.** At a 900-second tuner budget they completed
+  14 to 18 trials against 65 to 68 on the small ones, so those are floors for this
+  architecture rather than its ceiling.
+- **Three intervals reach no signal**, and that is the result rather than a gap in it:
+  `half_life`, `skin_reaction` and `cyp2c9_substrate`.
+- **The cross-validation score flattered the model at 26 of 29 endpoints**, by a median
+  of 0.045. It selects; it does not report.
+
+Prediction intervals over-cover at eight of the nine regression endpoints, median
+95.9% against a nominal 90%. Every bundle records its measured coverage.
+
+Full tables, the feature-set study behind the per-endpoint choices, and the
+engineering measurements are in [docs/benchmark.md](docs/benchmark.md).
 
 ## Configuration
 

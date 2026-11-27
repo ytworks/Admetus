@@ -28,12 +28,15 @@ contradict plausible-sounding estimates, and the measurements are what the desig
 
 ## Rules specific to this project
 
-1. **Never report a number you have not measured.** The README's benchmark section is empty
-   because the models are not trained. Do not fill it with estimates, and do not leave
-   placeholders.
+1. **Never report a number you have not measured.** Every figure in the README's benchmark
+   section and in `docs/benchmark.md` came from a run that is reproducible by the script named
+   beside it. Regenerate the accuracy tables with `scripts/benchmark_tables.py` rather than
+   editing a cell; both READMEs carry the same numbers and CI compares every numeric cell.
+   Do not fill a gap with an estimate, and do not leave placeholders.
 2. **Cross-validation scores are not performance.** They select; they do not report. Every record
-   carries `cv_score_biased: true`. Headline numbers come from the held-out set, with a bootstrap
-   interval, or from the official protocol.
+   carries `cv_score_biased: true`, and it is measured: out-of-fold flattered the model at 26 of
+   the 29 endpoints, by a median of 0.045. Headline numbers come from the held-out set, with a
+   bootstrap interval, or from the official protocol.
 3. **Never substitute a molecule.** A parse failure is reported with a reason. There is a test
    asserting no substitution happens; do not relax it.
 4. **The held-out set is sacred.** It is looked at once, at training time. Leakage-audit

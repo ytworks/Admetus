@@ -1,11 +1,170 @@
 # Benchmarks
 
 Everything here is measured, not estimated. Reproduce the featurization numbers with
-`scripts/bench_featurize.py`. Model accuracy tables are added once training has run;
-this file deliberately contains no placeholder numbers.
+`scripts/bench_featurize.py`, the accuracy tables with `scripts/benchmark_tables.py`,
+and the feature-set study with `scripts/feature_set_study.py`.
 
 Measurement host: Apple Silicon (arm64), 10 cores (4 performance + 6 efficiency),
 16 GB RAM, macOS, Python 3.12.13, RDKit 2026.09.2, NumPy 2.5.5.
+
+## Accuracy
+
+All 29 endpoints are trained. Two numbers are reported per endpoint and they measure
+different things:
+
+* **Held-out** is this project's own scaffold split, looked at exactly once, with a
+  bootstrap interval. The split sends the largest scaffold groups to training, so the
+  held-out set is the unusual chemistry on purpose and the estimate is pessimistic.
+* **Official protocol** is the benchmark group's published split, trained on its
+  `train_val` portion and scored once per seed on its test set, reported as the mean
+  and standard deviation over the protocol's five seeds. This is the number that can
+  sit beside the published leaderboard. It covers the 22 endpoints of the official
+  group; the other seven have no published split.
+
+The official numbers here were taken **with tuning off**, because five seeds per
+endpoint is five tuning runs. They are a floor, not a best effort. 110 runs, 43
+minutes.
+
+Training the 29 endpoints took 282 minutes of wall clock across three parallel
+workers at a 900-second tuner budget, the longest single endpoint being
+`cyp1a2_veith` at 1,243 seconds.
+
+### Held-out, on this project's scaffold split
+
+| Endpoint | Task | Metric | Held-out | 95% CI | n | Feature set |
+|---|---|---|---|---|---|---|
+| `caco2` | regression | mae | 0.3786 | [0.3344, 0.4237] | 181 | `morgan_p23` |
+| `pampa` | classification | auroc | 0.7204 | [0.6353, 0.8013] | 407 | `morgan_p23` |
+| `hia` | classification | auroc | 0.8930 | [0.7339, 1.0000] | 116 | `morgan_p2` |
+| `pgp` | classification | auroc | 0.8919 | [0.8462, 0.9306] | 242 | `morgan_p23` |
+| `bioavailability` | classification | auroc | 0.6736 | [0.5629, 0.7859] | 128 | `morgan_p2` |
+| `lipophilicity` | regression | mae | 0.6633 | [0.6261, 0.6990] | 840 | `morgan_p23` |
+| `solubility` | regression | mae | 1.3225 | [1.2648, 1.3809] | 1996 | `morgan_p23` |
+| `bbb` | classification | auroc | 0.8607 | [0.8146, 0.9039] | 393 | `morgan_p23` |
+| `ppbr` | regression | mae | 9.1137 | [7.8984, 10.3877] | 323 | `morgan_p23` |
+| `vdss` | regression | spearman | 0.6435 | [0.5522, 0.7217] | 222 | `morgan_p23` |
+| `cyp2c9_veith` | classification | auprc | 0.7133 | [0.6797, 0.7454] | 2418 | `morgan_p23` |
+| `cyp2d6_veith` | classification | auprc | 0.7357 | [0.7021, 0.7673] | 2626 | `morgan_p23` |
+| `cyp3a4_veith` | classification | auprc | 0.7910 | [0.7655, 0.8142] | 2466 | `morgan_p23` |
+| `cyp1a2_veith` | classification | auprc | 0.8654 | [0.8488, 0.8819] | 2516 | `morgan_p23` |
+| `cyp2c19_veith` | classification | auprc | 0.7971 | [0.7724, 0.8199] | 2533 | `morgan_p23` |
+| `cyp2c9_substrate` | classification | auprc | 0.2491 | [0.1477, 0.3892] | 133 | `morgan_p2` |
+| `cyp2d6_substrate` | classification | auprc | 0.5038 | [0.3780, 0.6707] | 133 | `morgan_p2` |
+| `cyp3a4_substrate` | classification | auroc | 0.6507 | [0.5529, 0.7409] | 133 | `morgan_p2` |
+| `half_life` | regression | spearman | 0.1982 | [0.0259, 0.3578] | 133 | `morgan_p23` |
+| `clearance_hepatocyte` | regression | spearman | 0.3804 | [0.2533, 0.5000] | 204 | `morgan_p23` |
+| `clearance_microsome` | regression | spearman | 0.3869 | [0.2671, 0.4913] | 220 | `morgan_p23` |
+| `ld50` | regression | mae | 0.5227 | [0.4970, 0.5473] | 1468 | `morgan_p23` |
+| `herg` | classification | auroc | 0.8758 | [0.8013, 0.9413] | 129 | `morgan_p2` |
+| `herg_karim` | classification | auroc | 0.8558 | [0.8417, 0.8695] | 2689 | `morgan_p23` |
+| `ames` | classification | auroc | 0.7992 | [0.7760, 0.8212] | 1451 | `morgan_p23` |
+| `dili` | classification | auroc | 0.8338 | [0.7493, 0.9102] | 95 | `morgan_p2` |
+| `carcinogens` | classification | auprc | 0.8101 | [0.6002, 0.9453] | 55 | `morgan_p2` |
+| `skin_reaction` | classification | auroc | 0.6245 | [0.4951, 0.7485] | 81 | `morgan_p2` |
+| `tox21_nr_ar` | classification | auprc | 0.5198 | [0.4067, 0.6280] | 1451 | `morgan` |
+
+
+### The official protocol, on the published split
+
+Mean and standard deviation over the protocol's five seeds, tuning off.
+
+| Endpoint | Metric | Official protocol | Seeds | Test rows |
+|---|---|---|---|---|
+| `caco2` | mae | 0.3084 +/- 0.0030 | 5 | 182 |
+| `hia` | auroc | 0.9806 +/- 0.0018 | 5 | 117 |
+| `pgp` | auroc | 0.9283 +/- 0.0016 | 5 | 245 |
+| `bioavailability` | auroc | 0.7233 +/- 0.0048 | 5 | 128 |
+| `lipophilicity` | mae | 0.6808 +/- 0.0008 | 5 | 840 |
+| `solubility` | mae | 1.1850 +/- 0.0027 | 5 | 1995 |
+| `bbb` | auroc | 0.8774 +/- 0.0035 | 5 | 406 |
+| `ppbr` | mae | 7.7789 +/- 0.0362 | 5 | 559 |
+| `vdss` | spearman | 0.6116 +/- 0.0041 | 5 | 226 |
+| `cyp2c9_veith` | auprc | 0.7234 +/- 0.0013 | 5 | 2419 |
+| `cyp2d6_veith` | auprc | 0.6611 +/- 0.0023 | 5 | 2626 |
+| `cyp3a4_veith` | auprc | 0.8274 +/- 0.0012 | 5 | 2467 |
+| `cyp2c9_substrate` | auprc | 0.3627 +/- 0.0062 | 5 | 135 |
+| `cyp2d6_substrate` | auprc | 0.6895 +/- 0.0114 | 5 | 135 |
+| `cyp3a4_substrate` | auroc | 0.6537 +/- 0.0061 | 5 | 135 |
+| `half_life` | spearman | 0.5353 +/- 0.0091 | 5 | 135 |
+| `clearance_hepatocyte` | spearman | 0.3843 +/- 0.0060 | 5 | 243 |
+| `clearance_microsome` | spearman | 0.5580 +/- 0.0057 | 5 | 221 |
+| `ld50` | mae | 0.7075 +/- 0.0005 | 5 | 1478 |
+| `herg` | auroc | 0.8470 +/- 0.0045 | 5 | 132 |
+| `ames` | auroc | 0.7741 +/- 0.0015 | 5 | 1457 |
+| `dili` | auroc | 0.9023 +/- 0.0037 | 5 | 96 |
+
+### Four things these tables say that are worth reading before quoting one
+
+**1. The cross-validation score flattered the model at 26 of the 29 endpoints**,
+by a median of 0.045 in each metric's own units. That is what
+`cv_score_biased: true` has always asserted, now measured. The worst cases are
+`solubility` (out-of-fold MAE 0.8315, held-out 1.3225), `half_life` (Spearman 0.5673
+against 0.1982) and `clearance_microsome` (0.5948 against 0.3869). Held-out came out
+*better* at only three: `herg`, `cyp2d6_veith` and `carcinogens`. Anyone tempted to
+report an out-of-fold number as performance should start here.
+
+**2. Nine endpoints are budget-limited, not search-limited.** At a 900-second
+budget the tuner completed 14 to 18 trials on `solubility`, `herg_karim`, `ld50`,
+`lipophilicity` and all five CYP inhibition panels, against 65 to 68 on the small
+ones. Those nine got roughly a quarter of the search the rest did, so their numbers
+are a floor for this architecture rather than its ceiling.
+
+**3. Three endpoints have an interval that reaches no-signal, and saying so is the
+result.** `half_life` held-out Spearman is 0.1982 with an interval of
+[0.0259, 0.3578], whose lower end is indistinguishable from no correlation at all.
+`skin_reaction` is AUROC 0.6245 [0.4951, 0.7485], straddling 0.5. `cyp2c9_substrate`
+is average precision 0.2491 [0.1477, 0.3892] at a 21% positive rate, so the interval
+contains the base rate. These are reported as they are rather than omitted.
+
+**4. Which split is harder depends on the endpoint, in both directions.** The
+official split is easier at `half_life` (0.1982 against 0.5353), `clearance_microsome`
+(0.3869 against 0.5580) and `cyp2d6_substrate` (0.5038 against 0.6895), and harder at
+`ld50` (MAE 0.5227 against 0.7075) and `vdss` (0.6435 against 0.6116). "The scaffold
+split is the harder one" is not a safe generalization, and the gap between the two
+columns is not a measure of either split's difficulty on its own.
+
+### Why the standard deviation over seeds is small, and not comparable
+
+The spread over seeds runs from 0.0005 to 0.0362, which is far tighter than the
+leaderboard's own error bars. That is a property of this pipeline, not a result:
+the seed moves the fold assignment inside the training portion and nothing else.
+`train_val` is not resampled into train and valid, because the round count comes
+from scaffold-grouped cross-validation over the whole training portion. A protocol
+that resamples train/valid per seed varies more.
+
+So the **mean is comparable with the leaderboard and the standard deviation is not.**
+Quoting our spread against theirs would understate the real variability of the
+approach.
+
+### Prediction interval coverage
+
+Conformal intervals on the regression endpoints, measured on the held-out set
+against the nominal level:
+
+| Endpoint | Nominal | Measured coverage | Held-out rows |
+|---|---|---|---|
+| `caco2` | 90% | 100.0% | 181 |
+| `lipophilicity` | 90% | 99.3% | 840 |
+| `solubility` | 90% | 88.9% | 1996 |
+| `ppbr` | 90% | 92.6% | 323 |
+| `vdss` | 90% | 95.9% | 222 |
+| `half_life` | 90% | 95.5% | 133 |
+| `clearance_hepatocyte` | 90% | 93.1% | 204 |
+| `clearance_microsome` | 90% | 96.4% | 220 |
+| `ld50` | 90% | 97.3% | 1468 |
+
+
+**Eight of the nine over-cover, with a median of 95.9% against a nominal 90%**, and
+only `solubility` lands on the level at 88.9%. The intervals are therefore wider than
+asked for almost everywhere.
+
+The mechanism is visible in how the width is fitted: it comes from the out-of-fold
+residuals of the fold models, each of which trains on four fifths of the data, while
+the width is then applied to the production ensemble, which averages all five. The
+ensemble's errors are smaller than the calibration set's, so an interval sized for the
+calibration set is too wide for the thing it is attached to. Narrowing it is a change
+to a measured quantity and has not been attempted here; the measured coverage is
+recorded in every bundle so a caller can see what it actually gets.
 
 ## Feature space widths
 
