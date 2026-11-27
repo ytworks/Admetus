@@ -30,7 +30,8 @@ def _output_columns(endpoint, prefix: str = "") -> list[dict[str, object]]:
             "unit": "probability" if endpoint.task == "classification" else endpoint.unit,
             "range": [0.0, 1.0] if endpoint.task == "classification"
             else (list(endpoint.output_range) if endpoint.output_range else None),
-            "meaning": "calibrated probability of the positive class"
+            "meaning": "probability of the positive class as LightGBM reports it, "
+                       "averaged over the fold models and not calibrated"
             if endpoint.task == "classification"
             else "predicted value on the published scale",
         },

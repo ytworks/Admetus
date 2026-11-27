@@ -31,7 +31,6 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import sparse
 
-from admetus.data.registry import MAX_FEATURES, PrevalenceRange
 from admetus.errors import InputDataError
 from admetus.logging import get_logger
 
@@ -102,57 +101,6 @@ def identity_basis(n_raw: int) -> ColumnBasis:
     return ColumnBasis(kept=np.arange(n_raw, dtype=np.int32), n_raw=n_raw)
 
 
-def fit_basis(
-    matrix: sparse.csr_matrix,
-    band: PrevalenceRange,
-    max_features: int = MAX_FEATURES,
-) -> ColumnBasis:
-    """Select columns from a training matrix.
-
-    Args:
-        matrix: Training feature matrix. Only this matrix's rows may be used:
-            including held-out rows would make the selection depend on data the
-            estimate is supposed to be independent of.
-        band: Prevalence band to retain.
-        max_features: Cap on retained columns, applied by descending prevalence.
-
-    Returns:
-        The fitted :class:`ColumnBasis`.
-
-    Raises:
-        InputDataError: The band retains nothing.
-    """
-    n_rows, n_raw = matrix.shape
-    if n_rows == 0:
-        raise InputDataError("cannot fit a column basis on an empty matrix")
-
-    counts = column_counts(matrix)
-    prevalence = counts / n_rows
-    keep = (
-        (prevalence >= band.low)
-        & (prevalence <= band.high)
-        & (counts >= band.min_count)
-        & (counts < n_rows)  # a column set in every row separates nothing
-    )
-    kept = np.flatnonzero(keep).astype(np.int32)
-
-    if kept.size == 0:
-        raise InputDataError(
-            f"no column survived pruning at {band.describe()} over {n_rows} rows. "
-            "The feature matrix is empty or the band is too narrow."
-        )
-
-    if kept.size > max_features:
-        # Keep the most prevalent, which are the ones with enough support to split on.
-        order = np.argsort(-counts[kept], kind="stable")[:max_features]
-        kept = np.sort(kept[order]).astype(np.int32)
-        log.debug("capped the basis at %d columns", max_features)
-
-    basis = ColumnBasis(kept=kept, n_raw=int(n_raw))
-    log.info("%s at %s over %d rows", basis.describe(), band.describe(), n_rows)
-    return basis
-
-
 def apply_basis(matrix: sparse.csr_matrix, basis: ColumnBasis) -> sparse.csr_matrix:
     """Narrow a raw-space matrix to a basis.
 
@@ -202,4 +150,4 @@ def project(matrix: sparse.csr_matrix, col_map: np.ndarray, n_cols: int) -> spar
 
 
 __all__ = [
-    "identity_basis","ColumnBasis", "apply_basis", "column_counts", "fit_basis", "project"]
+    "identity_basis","ColumnBasis", "apply_basis", "column_counts", "project"]

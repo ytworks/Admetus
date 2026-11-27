@@ -10,9 +10,7 @@ from admetus.data.registry import (
     get_endpoint,
     load_registry,
     official_endpoints,
-    prevalence_range,
     resolve_keys,
-    search_budget,
 )
 from admetus.errors import UsageError
 
@@ -82,27 +80,6 @@ def test_every_endpoint_gets_the_same_feature_space():
     # And the row count no longer changes the answer.
     small, large = get_endpoint("carcinogens"), get_endpoint("herg_karim")
     assert small.featurizer_spec(220).feature_set == large.featurizer_spec(13_445).feature_set
-
-def test_prevalence_band_is_two_sided_and_tightens_with_size():
-    small = prevalence_range(300)
-    medium = prevalence_range(2000)
-    large = prevalence_range(13000)
-    assert small.low > medium.low > large.low
-    assert small.high < medium.high < large.high
-    for band in (small, medium, large):
-        assert 0 < band.low < band.high < 1
-
-
-def test_budget_trades_trials_for_repeats_on_small_data():
-    small = search_budget(400)
-    large = search_budget(13000)
-    assert small.cv_repeats > large.cv_repeats
-    assert small.trials < large.trials
-
-
-def test_budget_overrides_win():
-    assert search_budget(400, trials=7, cv_repeats=1) == search_budget(99999, trials=7, cv_repeats=1)
-
 
 def test_low_confidence_is_flagged_for_small_datasets():
     assert get_endpoint("carcinogens").low_confidence() is True

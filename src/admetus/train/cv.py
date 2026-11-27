@@ -30,12 +30,6 @@ from scipy import sparse
 from admetus._compat import load_lightgbm
 from admetus.data.splits import Split
 
-#: Below this many training rows in a fold, early stopping does more harm than good.
-MIN_ROWS_FOR_EARLY_STOPPING = 1_000
-
-#: Share of a fold's training rows held back as an early-stopping watchlist.
-WATCHLIST_FRACTION = 0.12
-
 #: Rounds without improvement before stopping.
 EARLY_STOPPING_ROUNDS = 100
 
@@ -113,14 +107,6 @@ def base_params(task: str, metric: str, num_threads: int = 0, seed: int = 0) -> 
     return params
 
 
-def _watchlist_split(n_rows: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
-    """Split a fold's training rows into a fitting set and a watchlist."""
-    rng = np.random.default_rng(seed)
-    order = rng.permutation(n_rows)
-    n_watch = max(1, int(round(n_rows * WATCHLIST_FRACTION)))
-    return np.sort(order[n_watch:]), np.sort(order[:n_watch])
-
-
 def fit_fold(
     matrix: sparse.csr_matrix,
     y: np.ndarray,
@@ -175,28 +161,11 @@ def fit_fold(
         )
         used_early_stopping = True
         best_iteration = int(booster.best_iteration or booster.num_trees())
-    elif x_train.shape[0] < MIN_ROWS_FOR_EARLY_STOPPING:
-        # Too small for a watchlist; the caller should have been tuning the round
-        # count instead, but fall back to a fixed, modest number of rounds.
-        dataset = lgb.Dataset(x_train, label=y_train, params=params, free_raw_data=False)
-        booster = lgb.train(params, dataset, num_boost_round=300)
-        used_early_stopping = False
-        best_iteration = 300
     else:
-        inner_fit, inner_watch = _watchlist_split(x_train.shape[0], seed)
-        fit_set = lgb.Dataset(x_train[inner_fit], label=y_train[inner_fit], params=params, free_raw_data=False)
-        watch_set = lgb.Dataset(
-            x_train[inner_watch], label=y_train[inner_watch], reference=fit_set, params=params, free_raw_data=False
+        raise ValueError(
+            "fit_fold needs either a fixed num_boost_round or stop_on_fold; carving an inner "
+            "watchlist from the fold's training rows is not what the reference implementation does"
         )
-        booster = lgb.train(
-            params,
-            fit_set,
-            num_boost_round=MAX_BOOST_ROUNDS,
-            valid_sets=[watch_set],
-            callbacks=[lgb.early_stopping(EARLY_STOPPING_ROUNDS, verbose=False)],
-        )
-        used_early_stopping = True
-        best_iteration = int(booster.best_iteration or booster.num_trees())
 
     prediction = booster.predict(matrix[valid_rows], num_iteration=best_iteration)
     return FoldFit(
@@ -208,25 +177,11 @@ def fit_fold(
     )
 
 
-def deployment_rounds(fits: list[FoldFit]) -> int:
-    """Pick the fixed round count for the models that ship.
-
-    The median of what the folds chose, with 10% headroom because the deployed
-    models see slightly more data than the watchlist-reduced fits did.
-    """
-    if not fits:
-        raise ValueError("no folds to summarize")
-    median = float(np.median([f.best_iteration for f in fits]))
-    return max(10, int(round(median * 1.1)))
-
 
 __all__ = [
     "EARLY_STOPPING_ROUNDS",
     "MAX_BOOST_ROUNDS",
-    "MIN_ROWS_FOR_EARLY_STOPPING",
-    "WATCHLIST_FRACTION",
     "FoldFit",
     "base_params",
-    "deployment_rounds",
     "fit_fold",
 ]

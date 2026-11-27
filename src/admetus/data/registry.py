@@ -41,45 +41,6 @@ HIGHER_IS_BETTER: dict[str, bool] = {"auroc": True, "auprc": True, "spearman": T
 #: point estimate, so callers are told so explicitly.
 LOW_CONFIDENCE_ROWS = 600
 
-#: Below this many training rows, rare columns are pruned on a looser band. This is
-#: about pruning only: every endpoint gets the same feature space.
-SMALL_TRAINING_ROWS = 1_000
-
-#: Below this many rows, spend the budget on repeated cross-validation instead of
-#: more Optuna trials: the objective's own noise exceeds the effect being searched for.
-NOISY_OBJECTIVE_ROWS = 1_500
-
-#: Safety valve on the number of retained columns.
-MAX_FEATURES = 20_000
-
-
-@dataclass(frozen=True)
-class PrevalenceRange:
-    """The fraction of molecules a column must be set in to be retained.
-
-    Two-sided: a column set in 99% of molecules carries as little signal as one
-    set in 1%, and the plan's absolute-count rule only guarded the rare side.
-    """
-
-    low: float
-    high: float
-    min_count: int = 0
-
-    def describe(self) -> str:
-        return f"{self.low:.1%}-{self.high:.1%} (min {self.min_count} molecules)"
-
-
-@dataclass(frozen=True)
-class SearchBudget:
-    """How much hyperparameter search an endpoint gets."""
-
-    trials: int
-    cv_repeats: int
-
-    @property
-    def total_cv_runs(self) -> int:
-        return self.trials * self.cv_repeats
-
 
 @dataclass(frozen=True)
 class Endpoint:
@@ -167,33 +128,6 @@ class Endpoint:
             "description": self.description,
             "notes": self.notes,
         }
-
-
-def prevalence_range(n_train: int) -> PrevalenceRange:
-    """Choose the column retention band for a training set of this size."""
-    if n_train < SMALL_TRAINING_ROWS:
-        return PrevalenceRange(0.02, 0.98, min_count=5)
-    if n_train <= 3_000:
-        return PrevalenceRange(0.01, 0.99, min_count=5)
-    return PrevalenceRange(0.003, 0.997, min_count=10)
-
-
-def search_budget(n_train: int, trials: int | None = None, cv_repeats: int | None = None) -> SearchBudget:
-    """Split the search budget between trials and repeated cross-validation.
-
-    Args:
-        n_train: Size of the training portion.
-        trials: Explicit override.
-        cv_repeats: Explicit override.
-    """
-    if n_train < NOISY_OBJECTIVE_ROWS:
-        default = SearchBudget(trials=15, cv_repeats=3)
-    else:
-        default = SearchBudget(trials=50, cv_repeats=1)
-    return SearchBudget(
-        trials=trials if trials is not None else default.trials,
-        cv_repeats=cv_repeats if cv_repeats is not None else default.cv_repeats,
-    )
 
 
 def _coerce(raw: dict[str, Any], defaults: dict[str, Any]) -> Endpoint:
@@ -310,15 +244,10 @@ def resolve_keys(keys: tuple[str, ...] | list[str], select_all: bool = False) ->
 __all__ = [
     "HIGHER_IS_BETTER",
     "LOW_CONFIDENCE_ROWS",
-    "MAX_FEATURES",
     "Endpoint",
-    "PrevalenceRange",
-    "SearchBudget",
     "all_endpoints",
     "get_endpoint",
     "load_registry",
     "official_endpoints",
-    "prevalence_range",
     "resolve_keys",
-    "search_budget",
 ]

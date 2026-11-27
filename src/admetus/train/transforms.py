@@ -137,16 +137,4 @@ def from_dict(payload: dict[str, Any] | None) -> Transform:
     raise InputDataError(f"unknown label transform {name!r} in bundle")
 
 
-def clamp(y: np.ndarray, output_range: tuple[float | None, float | None] | None) -> np.ndarray:
-    """Clamp predictions into a declared range.
-
-    For a bounded target this cannot make mean absolute error worse and usually
-    improves it, so it is applied to every endpoint that declares a range.
-    """
-    if not output_range:
-        return y
-    low, high = output_range
-    return np.clip(np.asarray(y, dtype=np.float64), low, high)
-
-
-__all__ = ["IDENTITY", "Log10Safe", "Transform", "clamp", "fit", "from_dict"]
+__all__ = ["IDENTITY", "Log10Safe", "Transform", "fit", "from_dict"]
