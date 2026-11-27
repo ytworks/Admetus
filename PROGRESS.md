@@ -4,11 +4,11 @@ Cross-session memory for Admetus: what exists, what is measured, what is not don
 and what to pick up next. Read this first, then `CLAUDE.md`.
 
 Last updated: 2026-11-27. Branch `feat/core-featurizer-and-data`, draft PR #1.
-228 tests pass locally and in CI on Ubuntu and macOS for Python 3.12 and 3.13.
+237 tests pass locally and in CI on Ubuntu and macOS for Python 3.12 and 3.13.
 
 ## State
 
-Every layer is implemented and tested. 228 tests pass, `ruff check .` is clean, and
+Every layer is implemented and tested. 237 tests pass, `ruff check .` is clean, and
 the full path works end to end on real data: fetch, train with automatic tuning,
 save, load, predict into a CSV.
 
@@ -33,6 +33,7 @@ The official numbers were taken with tuning off and are labelled a floor.
 | Trained models | done: 29 of 29, 282 minutes over three parallel workers at a 900s budget |
 | Accuracy numbers | done: held-out with intervals, plus the official five-seed protocol for all 22 |
 | Published release | **not done**: the machinery works end to end, but nothing is uploaded |
+| Review on PR #1 | all 16 findings fixed, 6 P1 and 10 P2, each with a test |
 
 ## What to do next
 
@@ -99,6 +100,20 @@ Each of these was measured, and several contradict what the plan originally said
   Choosing against held-out data would turn the reported number into a selection
   score. The study therefore ranks on pooled out-of-fold predictions and runs two
   seeds, so a challenger has to beat the default by more than the fold noise.
+- **The official protocol takes the size rule, not the registry's overrides.** Those
+  overrides were measured over a whole dataset, which for an official-group endpoint
+  holds the published test compounds -- 97 of Caco-2's 182 test rows, 102 of
+  half-life's 135. Measured, inheriting them moved Caco-2 by 0.0130 the optimistic
+  way and half-life by 0.0198 the pessimistic way. A leak is not a thumb on the scale
+  that always flatters; it is a number you can no longer say what it measures.
+- **Scaffold grouping uses the standardized structure.** Grouping the input string let
+  a salt sit opposite its own free base: 9 of 129 held-out hERG molecules shared a
+  standardized scaffold with a training row. Rerunning all 29 moved 8 down, 7 up and
+  left 13 bit-identical, median 0.0000.
+- **Anything a manifest or a CSV supplies is a name, not a path.** Install destinations
+  are shape-checked and containment-checked before any write; a short CSV row is padded
+  so the appended columns land where the header says; a row with surplus fields is
+  refused rather than shifting them.
 - **The automatic tuner owns the search space**, by instruction. Two costs are
   real and recorded in every bundle: its `feature_fraction` grid starts at 0.4,
   and it sets `feature_pre_filter` to `False`. The explicit prevalence pruning is

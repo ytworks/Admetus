@@ -283,35 +283,35 @@ admetus models pull --all
 
 | Endpoint | Metric | Held-out (95% CI) | Official protocol | Notes |
 |---|---|---|---|---|
-| `caco2` | mae | 0.3786 [0.3344, 0.4237] | 0.3084 +/- 0.0030 |  |
-| `pampa` | auroc | 0.7204 [0.6353, 0.8013] | no published split |  |
-| `hia` | auroc | 0.8930 [0.7339, 1.0000] | 0.9806 +/- 0.0018 | small test set |
-| `pgp` | auroc | 0.8919 [0.8462, 0.9306] | 0.9283 +/- 0.0016 |  |
-| `bioavailability` | auroc | 0.6736 [0.5629, 0.7859] | 0.7233 +/- 0.0048 |  |
+| `caco2` | mae | 0.3786 [0.3344, 0.4237] | 0.3214 +/- 0.0038 |  |
+| `pampa` | auroc | 0.6927 [0.6013, 0.7823] | no published split |  |
+| `hia` | auroc | 0.9034 [0.7483, 0.9972] | 0.9808 +/- 0.0027 | small test set |
+| `pgp` | auroc | 0.8919 [0.8462, 0.9306] | 0.9284 +/- 0.0006 |  |
+| `bioavailability` | auroc | 0.6750 [0.5507, 0.7955] | 0.7259 +/- 0.0130 |  |
 | `lipophilicity` | mae | 0.6633 [0.6261, 0.6990] | 0.6808 +/- 0.0008 | tuning budget-limited |
-| `solubility` | mae | 1.3225 [1.2648, 1.3809] | 1.1850 +/- 0.0027 | tuning budget-limited |
-| `bbb` | auroc | 0.8607 [0.8146, 0.9039] | 0.8774 +/- 0.0035 |  |
+| `solubility` | mae | 1.3204 [1.2619, 1.3805] | 1.1871 +/- 0.0054 | tuning budget-limited, official run partial |
+| `bbb` | auroc | 0.8731 [0.8256, 0.9135] | 0.8732 +/- 0.0019 |  |
 | `ppbr` | mae | 9.1137 [7.8984, 10.3877] | 7.7789 +/- 0.0362 |  |
-| `vdss` | spearman | 0.6435 [0.5522, 0.7217] | 0.6116 +/- 0.0041 |  |
-| `cyp2c9_veith` | auprc | 0.7133 [0.6797, 0.7454] | 0.7234 +/- 0.0013 | tuning budget-limited |
-| `cyp2d6_veith` | auprc | 0.7357 [0.7021, 0.7673] | 0.6611 +/- 0.0023 | tuning budget-limited |
-| `cyp3a4_veith` | auprc | 0.7910 [0.7655, 0.8142] | 0.8274 +/- 0.0012 | tuning budget-limited |
-| `cyp1a2_veith` | auprc | 0.8654 [0.8488, 0.8819] | no published split | tuning budget-limited |
-| `cyp2c19_veith` | auprc | 0.7971 [0.7724, 0.8199] | no published split | tuning budget-limited |
+| `vdss` | spearman | 0.6304 [0.5308, 0.7162] | 0.6263 +/- 0.0042 |  |
+| `cyp2c9_veith` | auprc | 0.7190 [0.6846, 0.7542] | 0.7228 +/- 0.0006 | tuning budget-limited |
+| `cyp2d6_veith` | auprc | 0.7299 [0.6963, 0.7620] | 0.6615 +/- 0.0009 |  |
+| `cyp3a4_veith` | auprc | 0.7876 [0.7625, 0.8122] | 0.8288 +/- 0.0041 | tuning budget-limited |
+| `cyp1a2_veith` | auprc | 0.8661 [0.8500, 0.8820] | no published split | tuning budget-limited |
+| `cyp2c19_veith` | auprc | 0.7950 [0.7711, 0.8192] | no published split | tuning budget-limited |
 | `cyp2c9_substrate` | auprc | 0.2491 [0.1477, 0.3892] | 0.3627 +/- 0.0062 | interval reaches the base rate |
 | `cyp2d6_substrate` | auprc | 0.5038 [0.3780, 0.6707] | 0.6895 +/- 0.0114 |  |
 | `cyp3a4_substrate` | auroc | 0.6507 [0.5529, 0.7409] | 0.6537 +/- 0.0061 |  |
-| `half_life` | spearman | 0.1982 [0.0259, 0.3578] | 0.5353 +/- 0.0091 |  |
-| `clearance_hepatocyte` | spearman | 0.3804 [0.2533, 0.5000] | 0.3843 +/- 0.0060 |  |
-| `clearance_microsome` | spearman | 0.3869 [0.2671, 0.4913] | 0.5580 +/- 0.0057 |  |
-| `ld50` | mae | 0.5227 [0.4970, 0.5473] | 0.7075 +/- 0.0005 | tuning budget-limited |
-| `herg` | auroc | 0.8758 [0.8013, 0.9413] | 0.8470 +/- 0.0045 |  |
-| `herg_karim` | auroc | 0.8558 [0.8417, 0.8695] | no published split | tuning budget-limited |
-| `ames` | auroc | 0.7992 [0.7760, 0.8212] | 0.7741 +/- 0.0015 |  |
-| `dili` | auroc | 0.8338 [0.7493, 0.9102] | 0.9023 +/- 0.0037 | small test set |
+| `half_life` | spearman | 0.2273 [0.0576, 0.3876] | 0.5551 +/- 0.0062 |  |
+| `clearance_hepatocyte` | spearman | 0.3804 [0.2533, 0.5000] | 0.4009 +/- 0.0041 |  |
+| `clearance_microsome` | spearman | 0.3869 [0.2671, 0.4913] | 0.5928 +/- 0.0093 |  |
+| `ld50` | mae | 0.5243 [0.4990, 0.5489] | 0.7075 +/- 0.0011 | tuning budget-limited |
+| `herg` | auroc | 0.8872 [0.8238, 0.9386] | 0.8454 +/- 0.0015 |  |
+| `herg_karim` | auroc | 0.8534 [0.8389, 0.8672] | no published split | tuning budget-limited |
+| `ames` | auroc | 0.8025 [0.7796, 0.8244] | 0.7745 +/- 0.0009 |  |
+| `dili` | auroc | 0.8342 [0.7518, 0.9119] | 0.9045 +/- 0.0035 | small test set |
 | `carcinogens` | auprc | 0.8101 [0.6002, 0.9453] | no published split | small test set |
 | `skin_reaction` | auroc | 0.6245 [0.4951, 0.7485] | no published split | small test set, interval reaches no signal |
-| `tox21_nr_ar` | auprc | 0.5198 [0.4067, 0.6280] | no published split |  |
+| `tox21_nr_ar` | auprc | 0.5079 [0.3900, 0.6164] | no published split |  |
 
 数値を引用する前に読むべきこと:
 
@@ -320,15 +320,17 @@ admetus models pull --all
   平均は比較可能、ばらつきは比較不可です。
 - **どちらの分割が難しいかはエンドポイントごとに逆向きです。** 公式分割の方が易しいのは
   `half_life`、`clearance_microsome`、`cyp2d6_substrate`、難しいのは `ld50` と `vdss` です。
-- **9 エンドポイントは予算律速です。** 900 秒のチューナー予算で試行は 14〜18 にとどまり、
+- **8 エンドポイントは予算律速です。** 900 秒のチューナー予算で試行は 14〜19 にとどまり、
   小さいエンドポイントの 65〜68 に対して少ないため、この構成の上限ではなく下限です。
 - **3 つの区間は無信号域に達しており**、それは欠落ではなく結果そのものです:
   `half_life`、`skin_reaction`、`cyp2c9_substrate`。
-- **交差検証スコアは 29 中 26 エンドポイントで性能を過大評価**し、中央値で 0.045 でした。
+- **交差検証スコアは 29 中 26 エンドポイントで性能を過大評価**し、中央値で 0.053 でした。
   選択には使えますが、報告には使えません。
 
 予測区間は回帰 9 エンドポイントのうち 8 つで過剰にカバーし、名目 90% に対して中央値
-95.9% でした。実測カバー率は各バンドルに記録されています。
+97.0% でした。実測カバー率は各バンドルに記録されています。公式結果のうち 1 件は部分的と
+印を付けています: solubility の公開テスト 1,997 行のうち特徴量化できたのは 1,995 行で、
+平均はその部分集合に対する値です。
 
 全体の表、エンドポイントごとの選択の根拠となった特徴量セットの実測、そしてエンジニア
 リング面の測定値は [docs/benchmark.md](docs/benchmark.md) にあります。
