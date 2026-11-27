@@ -161,6 +161,28 @@ Train every endpoint. This takes hours, skips endpoints that already have a mode
 admetus train --all --time-budget 900
 ```
 
+Run the official protocol, which trains on the benchmark group's own published split and scores
+its test set once per seed. The number this reports is the one comparable with the leaderboard;
+`admetus evaluate` reports this project's own scaffold split instead.
+
+```bash
+admetus benchmark fetch
+```
+
+```bash
+admetus benchmark run --all --time-budget 300 --report official.json
+```
+
+Package local bundles for a release, and install a published one.
+
+```bash
+admetus models package --out dist/models
+```
+
+```bash
+admetus models pull --all
+```
+
 ## CLI reference
 
 Logs go to standard error and data to standard output, so output can be piped. `--json` prints one
@@ -174,9 +196,13 @@ machine-readable object and nothing else. Nothing prompts.
 | `admetus data info` | Describe the fetched datasets after normalization |
 | `admetus train` | Tune and train one or more endpoints |
 | `admetus evaluate` | Report the held-out metrics recorded at training time |
+| `admetus benchmark fetch` | Download the benchmark group's published train/test splits |
+| `admetus benchmark run` | Run the official five-seed protocol on those splits |
 | `admetus predict` | Add prediction columns to a CSV |
 | `admetus models list` | List the model bundles present, optionally verifying them |
 | `admetus models show` | Print a bundle's full record |
+| `admetus models package` | Package bundles for release, with a manifest of digests |
+| `admetus models pull` | Install published bundles, verifying every archive |
 
 Every command that selects endpoints takes a repeatable `--endpoint KEY` plus `--all`.
 

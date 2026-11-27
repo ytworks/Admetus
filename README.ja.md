@@ -158,6 +158,28 @@ admetus predict -i compounds.csv -o predicted.csv --endpoint dili --report repor
 admetus train --all --time-budget 900
 ```
 
+公式プロトコルを実行します。ベンチマークグループが公開している分割の学習側で学習し、その
+テストセットをシードごとに 1 回だけ採点します。リーダーボードと比較できるのはこの数値で、
+`admetus evaluate` が報告するのは本プロジェクト自身の scaffold 分割です。
+
+```bash
+admetus benchmark fetch
+```
+
+```bash
+admetus benchmark run --all --time-budget 300 --report official.json
+```
+
+手元のバンドルをリリース用にまとめ、公開済みのものを導入します。
+
+```bash
+admetus models package --out dist/models
+```
+
+```bash
+admetus models pull --all
+```
+
 ## CLI リファレンス
 
 ログは標準エラー、データは標準出力に出るので、出力はパイプできます。`--json` は機械可読な
@@ -171,9 +193,13 @@ admetus train --all --time-budget 900
 | `admetus data info` | 正規化後のデータセットを説明する |
 | `admetus train` | 1 つ以上のエンドポイントをチューニングして学習する |
 | `admetus evaluate` | 学習時に記録したホールドアウト指標を報告する |
+| `admetus benchmark fetch` | ベンチマークグループが公開する学習/テスト分割を取得する |
+| `admetus benchmark run` | その分割の上で公式の 5 シードのプロトコルを実行する |
 | `admetus predict` | CSV に予測列を追記する |
 | `admetus models list` | 手元のモデルバンドルを一覧し、必要なら検証する |
 | `admetus models show` | バンドルの記録をすべて出力する |
+| `admetus models package` | digest のマニフェスト付きでバンドルをリリース用にまとめる |
+| `admetus models pull` | 公開済みバンドルを、各アーカイブを検証しながら導入する |
 
 エンドポイントを選ぶコマンドはすべて、繰り返し指定できる `--endpoint KEY` と `--all` を取ります。
 
