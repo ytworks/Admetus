@@ -49,6 +49,31 @@ DEFAULT_TIMEOUT = 120.0
 CHECKSUM_FILE = "checksums.json"
 
 
+class DigestMismatch(NetworkError):
+    """A file does not match the digest pinned in the registry.
+
+    Carries the detail so the caller can explain the escape hatch without having
+    to recompute anything.
+    """
+
+    def __init__(
+        self, url: str, path: Path, expected: str, actual: str, from_cache: bool
+    ) -> None:
+        self.url = url
+        self.path = Path(path)
+        self.expected = expected
+        self.actual = actual
+        self.from_cache = from_cache
+        where = "the cached file" if from_cache else "the downloaded file"
+        super().__init__(
+            f"{where} does not match the digest pinned in the registry.\n"
+            f"  pinned:  {expected}\n"
+            f"  found:   {actual}\n"
+            f"  source:  {url}\n"
+            f"  file:    {path}"
+        )
+
+
 @dataclass(frozen=True)
 class Download:
     """A dataset file on disk.
@@ -95,26 +120,43 @@ def write_checksums(directory: Path, checksums: dict[str, dict[str, object]]) ->
     tmp.replace(path)
 
 
-def fetch(url: str, destination: Path, timeout: float = DEFAULT_TIMEOUT, overwrite: bool = False) -> Download:
+def fetch(
+    url: str,
+    destination: Path,
+    timeout: float = DEFAULT_TIMEOUT,
+    overwrite: bool = False,
+    expected_sha256: str | None = None,
+) -> Download:
     """Download ``url`` to ``destination``.
+
+    The digest is checked **before** the file is moved into place. Checking after
+    the rename would mean a mismatched download had already replaced whatever was
+    there, so a bad fetch would destroy a file that had previously verified.
+    Instead the bytes are verified at the temporary path, only a matching file is
+    renamed in, and on mismatch just the temporary file is removed.
 
     Args:
         url: What to fetch.
         destination: Where to put it. Parent directories are created.
         timeout: Socket timeout in seconds.
         overwrite: Fetch again even when the file is already present.
+        expected_sha256: Digest the download must have. ``None`` skips the check.
 
     Returns:
         A :class:`Download` describing the file on disk.
 
     Raises:
-        NetworkError: The request failed. Distinct from a missing-model error so
-            a caller can tell whether retrying is worthwhile.
+        NetworkError: The request failed, or the bytes did not match the digest.
+            Distinct from a missing-model error so a caller can tell whether
+            retrying is worthwhile.
     """
     destination = Path(destination)
     if destination.is_file() and not overwrite:
         log.debug("already present: %s", destination)
-        return Download(destination, sha256_file(destination), destination.stat().st_size, from_cache=True)
+        digest = sha256_file(destination)
+        if expected_sha256 and digest != expected_sha256:
+            raise DigestMismatch(url, destination, expected_sha256, digest, from_cache=True)
+        return Download(destination, digest, destination.stat().st_size, from_cache=True)
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     partial = destination.with_name(destination.name + ".part")
@@ -139,9 +181,16 @@ def fetch(url: str, destination: Path, timeout: float = DEFAULT_TIMEOUT, overwri
         partial.unlink(missing_ok=True)
         raise NetworkError(f"{url} returned an empty response")
 
+    digest = digest.hexdigest()
+    if expected_sha256 and digest != expected_sha256:
+        # Only the temporary file goes. Anything already at the destination has
+        # verified before and is left exactly as it was.
+        partial.unlink(missing_ok=True)
+        raise DigestMismatch(url, destination, expected_sha256, digest, from_cache=False)
+
     partial.replace(destination)
     log.debug("fetched %s (%d bytes) -> %s", url, n_bytes, destination)
-    return Download(destination, digest.hexdigest(), n_bytes, from_cache=False)
+    return Download(destination, digest, n_bytes, from_cache=False)
 
 
 def fetch_dataset(
@@ -153,6 +202,9 @@ def fetch_dataset(
     accept_upstream_change: bool = False,
 ) -> Download:
     """Download one dataset and check it against the digest pinned in the registry.
+
+    The check happens inside :func:`fetch`, before the file is moved into place,
+    so a mismatched download never replaces a file that verified earlier.
 
     Args:
         key: Endpoint key, which names the file.
@@ -170,34 +222,26 @@ def fetch_dataset(
     Raises:
         NetworkError: The download failed, or its digest disagrees with the pin.
             Refusing is the point: adopting a changed file silently is what the
-            pin exists to prevent. The cached file is checked the same way, so a
-            file that changed on disk is caught too.
+            pin exists to prevent.
     """
     directory = Path(directory)
-    result = fetch(url, directory / f"{key}.tab", overwrite=overwrite)
-
-    if expected_sha256 and result.sha256 != expected_sha256:
-        message = (
-            f"{key}: the dataset does not match the digest pinned in the registry.\n"
-            f"  pinned:  {expected_sha256}\n"
-            f"  fetched: {result.sha256}\n"
-            f"  source:  {url}\n"
-            f"  file:    {result.path}"
-        )
+    path = directory / f"{key}.tab"
+    try:
+        result = fetch(url, path, overwrite=overwrite, expected_sha256=expected_sha256)
+    except DigestMismatch as mismatch:
         if not accept_upstream_change:
-            # Leave nothing half-adopted: the file goes, the pin stays.
-            result.path.unlink(missing_ok=True)
             raise NetworkError(
-                message
-                + "\n\nThe published dataset was most likely revised. Models trained on the "
-                "pinned bytes would no longer match this file, so the fetch is refused. "
-                "To take the new version deliberately, pass --accept-upstream-change, then "
-                "update the sha256 in endpoints.yaml and retrain the affected endpoints."
-            )
+                f"{key}: {mismatch}\n\nThe published dataset was most likely revised. Models "
+                "trained on the pinned bytes would no longer match this file, so the fetch is "
+                "refused and nothing on disk was replaced. To take the new version deliberately, "
+                "pass --accept-upstream-change, then update the sha256 in endpoints.yaml and "
+                "retrain the affected endpoints."
+            ) from mismatch
         log.warning(
-            "%s\n\nAccepted because --accept-upstream-change was given. Any model trained on "
-            "the pinned bytes is now STALE and must be retrained.", message,
+            "%s: %s\n\nAccepted because --accept-upstream-change was given. Any model trained "
+            "on the pinned bytes is now STALE and must be retrained.", key, mismatch,
         )
+        result = fetch(url, path, overwrite=not mismatch.from_cache)
 
     # An observed-state record, not the source of truth. The registry is that.
     checksums = read_checksums(directory)
@@ -296,6 +340,7 @@ def human_bytes(n: int) -> str:
 
 __all__ = [
     "CHECKSUM_FILE",
+    "DigestMismatch",
     "Download",
     "clear_partials",
     "extract_benchmark_archive",

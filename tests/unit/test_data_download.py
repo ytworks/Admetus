@@ -53,12 +53,27 @@ def test_refusal_names_both_digests_and_the_remedy(staged):
     assert "--accept-upstream-change" in message
 
 
-def test_refusal_leaves_nothing_half_adopted(staged):
-    """The observed record must not gain an entry for a file that was refused."""
+def test_refusal_leaves_the_existing_file_untouched(staged):
+    """A refused fetch must not destroy a file that verified earlier.
+
+    The digest is checked before anything is moved into place, so a mismatch
+    removes only the temporary download. An earlier version checked after the
+    rename and then deleted the file, which turned a bad fetch into data loss.
+    """
+    before = (staged / "fixture.tab").read_bytes()
     with pytest.raises(NetworkError):
         fetch_dataset("fixture", "https://example.invalid/x", staged, expected_sha256=WRONG)
+    assert (staged / "fixture.tab").read_bytes() == before
+    # And nothing was recorded for a fetch that did not happen.
     assert "fixture" not in read_checksums(staged)
-    assert not (staged / "fixture.tab").exists()
+
+
+def test_a_refused_download_leaves_no_temporary_file(tmp_path):
+    """The mismatched bytes must not be left behind at the partial path either."""
+    (tmp_path / "fixture.tab").write_bytes(CONTENT)
+    with pytest.raises(NetworkError):
+        fetch_dataset("fixture", "https://example.invalid/x", tmp_path, expected_sha256=WRONG)
+    assert not list(tmp_path.glob("*.part"))
 
 
 def test_the_pinned_value_is_not_rewritten_by_a_fetch(staged):
