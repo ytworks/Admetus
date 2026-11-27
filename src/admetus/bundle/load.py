@@ -16,6 +16,7 @@ digest is the real test.
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -137,6 +138,39 @@ def _booster_problem(path: Path) -> str | None:
     return None
 
 
+#: How long the child process gets to load a bundle's boosters. The largest here is
+#: 37 MB across five folds and loads in about a second.
+LOAD_CHECK_TIMEOUT = 120.0
+
+
+def _boosters_load(directory: Path) -> list[str]:
+    """Load the boosters in a child process and return what went wrong, if anything.
+
+    A non-zero exit with no readable answer is itself the answer: the loader died,
+    which is what a native abort looks like from here.
+    """
+    import subprocess
+
+    try:
+        done = subprocess.run(
+            [sys.executable, "-m", "admetus.bundle._loadcheck", str(directory)],
+            capture_output=True, text=True, timeout=LOAD_CHECK_TIMEOUT, check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:  # pragma: no cover
+        return [f"the boosters could not be checked: {exc}"]
+
+    try:
+        answer = json.loads(done.stdout.strip().splitlines()[-1])
+    except (json.JSONDecodeError, IndexError):
+        detail = (done.stderr or done.stdout or "").strip().splitlines()
+        tail = detail[-1] if detail else f"exit {done.returncode}"
+        return [
+            "LightGBM could not read the boosters: the loader exited with "
+            f"{done.returncode} without reporting ({tail})"
+        ]
+    return [] if answer.get("ok") else list(answer.get("problems") or ["the boosters do not load"])
+
+
 def verify(
     directory: Path, check_fingerprint: bool = True, check_boosters: bool = True
 ) -> tuple[bool, list[str]]:
@@ -146,13 +180,17 @@ def verify(
         directory: The bundle.
         check_fingerprint: Fingerprint the golden molecules, which catches an RDKit
             change that moved bit positions.
-        check_boosters: Check that every booster file is a whole model. Counting
-            them is not enough: a truncated fold file passed the count and then
-            failed at the first prediction, after the bundle had already replaced a
-            working one. The check is structural rather than a load, because
-            LightGBM's parser aborts the process on a truncated model -- it raises
-            from C++ through a path Python cannot catch -- so handing it a file that
-            might be broken is not an option inside a verifier.
+        check_boosters: Check that every booster loads and serves the bundle's own
+            column space. Counting the files is not enough, and neither is reading
+            them: a structural check on the end of the file caught a model cut in
+            half and accepted a real one missing its last two bytes, because the
+            damage was in the trailing metadata LightGBM reads after the marker. So
+            the boosters are loaded, in a child process -- LightGBM's parser aborts
+            the process on some truncations, raising from C++ through a path Python
+            cannot catch, and a verifier must not be the thing that kills the run.
+            Their feature counts are compared with the retained basis too, because
+            an intact booster from another feature preset loads perfectly and then
+            predicts on the wrong width.
 
     Returns:
         ``(ok, problems)``.
@@ -188,11 +226,15 @@ def verify(
     if found != expected:
         problems.append(f"expected {expected} booster file(s), found {found}")
     elif check_boosters:
+        # The cheap structural look first, so an obviously broken file does not cost
+        # a subprocess, then the only check that settles it.
         for index in range(expected):
             path = directory / BOOSTER_PATTERN.format(index=index)
             problem = _booster_problem(path)
             if problem:
                 problems.append(f"{path.name} {problem}")
+        if not problems:
+            problems.extend(_boosters_load(directory))
 
     if check_fingerprint:
         recorded = featurizer.get("golden_fingerprint")

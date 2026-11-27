@@ -22,7 +22,7 @@ from admetus.cli.options import (
     write_report,
 )
 from admetus.data.registry import resolve_keys
-from admetus.errors import EXIT_PARTIAL_FAILURE, ModelError, UsageError
+from admetus.errors import EXIT_PARTIAL_FAILURE, AdmetusError, ModelError, UsageError
 from admetus.predict import runner
 
 #: Rows that `--json` will carry inline. A JSON document holding a ten-million-row
@@ -176,12 +176,27 @@ def predict_command(
             json_csv = Path(name)
             out_path = json_csv
 
+        # Anything that can refuse the requested output shape is decided before the
+        # work. A duplicate header used to be found after inference, which produced a
+        # fresh report saying ok and then exit 2.
+        if inline_json and input_path is not None:
+            _refuse_unrepresentable_header(input_path, options, report_path, models)
+
         report = None
         try:
             report = runner.run(input_path, out_path, models, options)
+        except AdmetusError as exc:
+            # A refusal has to leave the report agreeing with the exit status. Before
+            # this, a run that exceeded the inline-JSON cap wrote nothing -- so a
+            # stale report from an earlier success stayed byte-for-byte in place and
+            # read as this run's result.
+            write_report(report_path, _failure_payload(exc, models, input_path))
+            raise
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
+            if json_csv is not None and report is None:
+                json_csv.unlink(missing_ok=True)
             if report is not None:
                 write_report(
                     report_path,
@@ -208,6 +223,56 @@ def predict_command(
             raise SystemExit(EXIT_PARTIAL_FAILURE)
 
     run_guarded(body, as_json=as_json)
+
+
+def _failure_payload(exc: Exception, models, source) -> dict:
+    """What `--report` gets when the command refuses rather than runs."""
+    return {
+        "ok": False,
+        "error": str(exc),
+        "error_type": type(exc).__name__,
+        "input": str(source) if source else None,
+        "output": None,
+        "endpoints": [m.key for m in models],
+        "predictions_written": False,
+    }
+
+
+def _refuse_unrepresentable_header(source: Path, options: runner.Options, report_path, models) -> None:
+    """Refuse an input whose header cannot survive the requested output shape.
+
+    A JSON object is keyed by name, so a repeated column name loses a value: the
+    header ``smiles,note,note`` came back carrying only the second ``note``. Checked
+    here, before inference, so the refusal costs nothing and no report claiming
+    success is written first.
+
+    Raises:
+        UsageError: The header repeats a column name.
+    """
+    from admetus.predict import csvio
+
+    dialect = csvio.sniff(source, encoding=options.encoding, sep=options.sep)
+    records = csvio.read_records(source, dialect)
+    try:
+        header = next(records).fields
+    except StopIteration:
+        return
+    finally:
+        records.close()
+
+    seen: dict[str, int] = {}
+    for name in header:
+        seen[name] = seen.get(name, 0) + 1
+    repeated = sorted(name for name, count in seen.items() if count > 1)
+    if not repeated:
+        return
+    exc = UsageError(
+        f"the input repeats the column name(s) {', '.join(repr(r) for r in repeated)}, which "
+        "cannot be represented as JSON objects without dropping a value. Pass -o/--output to "
+        "write the CSV, which keeps every column, and --json then prints the report alone."
+    )
+    write_report(report_path, _failure_payload(exc, models, source))
+    raise exc
 
 
 def _coerce(value: str):

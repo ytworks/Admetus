@@ -20,14 +20,29 @@ import pytest
 from admetus.bundle import manifest as mf
 from admetus.errors import ModelError, NetworkError
 
-#: A booster file's shape, which `verify` checks structurally because LightGBM's
-#: parser aborts the process on a truncated model rather than raising. Not loadable,
-#: and it does not need to be: these tests are about digests and refusals.
-STUB_BOOSTER = (
-    "tree\nversion=v4\nnum_class=1\n\nTree=0\nnum_leaves=1\n\n"
-    "end of trees\n\nfeature_importances:\n\nparameters:\n[boosting: gbdt]\n"
-    "end of parameters\n\npandas_categorical:null\n"
-)
+
+def _real_booster(n_features: int) -> str:
+    """A genuine one-tree LightGBM model of the given width.
+
+    Has to be genuine: `verify` loads every booster in a child process and compares
+    its width with the bundle's basis, because a hand-written stub is exactly what a
+    damaged file looks like, and an intact model of the wrong width is exactly what a
+    bundle from another feature preset looks like. Both are things the verifier is
+    for.
+    """
+    import lightgbm as lgb
+    import numpy as _np
+
+    rng = _np.random.default_rng(0)
+    x = rng.random((40, n_features))
+    y = (x[:, 0] > 0.5).astype(float)
+    booster = lgb.train(
+        {"objective": "binary", "verbose": -1, "num_leaves": 2, "min_data_in_leaf": 1,
+         "feature_pre_filter": False, "seed": 0},
+        lgb.Dataset(x, label=y),
+        num_boost_round=1,
+    )
+    return booster.model_to_string()
 
 
 def make_bundle(models_dir, key="dili", n_boosters=1, golden=None):
@@ -52,7 +67,9 @@ def make_bundle(models_dir, key="dili", n_boosters=1, golden=None):
         popcount=np.zeros(2, dtype=np.int32),
     )
     for index in range(n_boosters):
-        (directory / f"fold_{index}.txt").write_text(STUB_BOOSTER, encoding="utf-8")
+        (directory / f"fold_{index}.txt").write_text(
+            _real_booster(int(kept.size)), encoding="utf-8"
+        )
     # A training by-product that must not be published.
     (directory / "optuna.sqlite").write_bytes(b"not a model")
     (directory / "bundle.json").write_text(
@@ -329,6 +346,36 @@ def test_a_truncated_fold_is_caught_before_it_replaces_anything(tmp_path):
     fold.write_text(fold.read_text().split("end of trees")[0], encoding="utf-8")
 
     with pytest.raises(ModelError, match="cut short"):
+        mf.build(models, tmp_path / "dist")
+
+
+def test_a_fold_missing_its_last_bytes_is_caught_too(tmp_path):
+    """The marker a complete model ends with is not proof the model is complete.
+
+    A real fold short by two bytes keeps that marker, passed the structural check,
+    packaged and installed with both commands exiting 0, and then failed the first
+    prediction when LightGBM read its trailing metadata. Only loading it settles it.
+    """
+    models = tmp_path / "models"
+    directory = make_bundle(models)
+    fold = directory / "fold_0.txt"
+    fold.write_bytes(fold.read_bytes()[:-2])
+
+    with pytest.raises(ModelError, match="could not be loaded by LightGBM"):
+        mf.build(models, tmp_path / "dist")
+
+
+def test_a_fold_of_the_wrong_width_is_caught_though_it_loads(tmp_path):
+    """An intact booster from another feature preset is not a damaged file.
+
+    Nothing about reading it says anything is wrong; it has to be compared with the
+    basis the bundle ships, or it loads cleanly and predicts on the wrong width.
+    """
+    models = tmp_path / "models"
+    directory = make_bundle(models)
+    (directory / "fold_0.txt").write_text(_real_booster(7), encoding="utf-8")
+
+    with pytest.raises(ModelError, match="different feature space"):
         mf.build(models, tmp_path / "dist")
 
 
