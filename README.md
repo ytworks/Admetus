@@ -335,10 +335,26 @@ Read before quoting a number:
 - **The cross-validation score flattered the model at 26 of 29 endpoints**, by a median
   of 0.053. It selects; it does not report.
 
-Prediction intervals over-cover at eight of the nine regression endpoints, median
-97.0% against a nominal 90%. Every bundle records its measured coverage. One official
-result is marked partial: 1,995 of solubility's 1,997 published test rows could be
-featurized, so its mean is over a subset.
+One official result is marked partial: 1,995 of solubility's 1,997 published test rows
+could be featurized, so its mean is over a subset.
+
+### Prediction intervals are too wide to use
+
+`--interval` works, and on the regression endpoints it over-covers at eight of nine,
+median 97.0% against a nominal 90%. In practice that means the bounds are not useful
+yet. Aspirin, from the shipped models:
+
+| Endpoint | Prediction | Interval |
+|---|---|---|
+| `caco2` | -4.6294 | [-17.4381, 8.17931] |
+| `vdss` | 0.260846 | [0.00249137, 27.3106] |
+
+Caco-2's bound spans 25 log units on a dataset whose labels run from -7.76 to -3.51.
+The width is fitted on out-of-fold residuals from fold models that each see four
+fifths of the data, then applied to the five-model ensemble, whose errors are smaller.
+Narrowing it changes a measured quantity, so it is listed as work with its own
+before-and-after rather than adjusted by eye. Until then, read `<key>_ens_sd` and the
+coverage recorded in each bundle instead.
 
 Full tables, the feature-set study behind the per-endpoint choices, and the
 engineering measurements are in [docs/benchmark.md](docs/benchmark.md).
