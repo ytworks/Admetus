@@ -13,9 +13,10 @@ with stable exit codes.
 Give it a CSV with a SMILES column and it appends prediction columns, leaving every other column
 byte for byte as it found them.
 
-> **Status: version 0.1, in development.** No trained models are published yet, so the accuracy
-> tables below are empty on purpose rather than filled with placeholders. Train locally with
-> `admetus train`. Interfaces may still change.
+> **Status: version 0.1.** Trained bundles for all 29 endpoints are published as the
+> [`models-v0.1.0`](https://github.com/ytworks/Admetus/releases/tag/models-v0.1.0) release;
+> `admetus models pull --all` installs them, verifying every archive. Interfaces may still
+> change.
 
 - [Features](#features)
 - [How it works](#how-it-works)
@@ -382,7 +383,8 @@ a point estimate (`low_confidence`).
 
 ## Limitations
 
-- **No published models yet.** Train locally.
+- **Models are trained with a fixed 240-second-per-fold tuning budget.** A longer budget may
+  find better parameters at some endpoints; the published bundles are what that budget reached.
 - **2D only.** No conformer generation, so stereochemistry is invisible to the model. Enantiomers
   receive identical predictions.
 - **The held-out score is a held-out-row score, not an unseen-structure score.** Rows are split as
