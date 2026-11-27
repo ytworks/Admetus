@@ -50,7 +50,18 @@ jobs:
       - name: Install
         run: uv sync --all-extras --python ${{ matrix.python }}
       - name: Self-check
-        run: uv run admetus doctor
+        # doctor exits 3 when the install is sound but no model bundle is present,
+        # which is the expected state in a fresh checkout. Anything else is a real
+        # problem: 1 means the install itself is broken.
+        run: |
+          set +e
+          uv run admetus doctor
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ] && [ "$code" -ne 3 ]; then
+            echo "::error::admetus doctor reported a broken install (exit $code)"
+            exit "$code"
+          fi
       - name: Tests
         # No network: the datasets are fetched, not vendored, and the tests use
         # fixtures instead.
