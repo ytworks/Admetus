@@ -333,6 +333,7 @@ def train_endpoint(
         tuned = tuning.auto_tune(
             x_train, y_train, fold_sets, params, seed=seed, time_budget=time_budget,
             storage=tuning.study_path(models_dir, endpoint.key) if models_dir else None,
+            model_dir=tuning.booster_dir(models_dir, endpoint.key) if models_dir else None,
             study_name=tuning.study_name(
                 endpoint.key, spec.feature_set, basis.n_cols, len(fold_sets), params
             ),
@@ -343,6 +344,15 @@ def train_endpoint(
         # early-stopped on the folds they were scored against, so they are not what
         # ships; the production ensemble is refitted below at a fixed count.
         rounds = _rounds_from(tuned.boosters)
+        tune_record["deployment_rounds_source"] = (
+            "median of the tuner's folds, with 10% headroom" if tuned.boosters
+            else "DEFAULT: the tuner returned no folds, so the round count was not tuned"
+        )
+        if not tuned.boosters:
+            log.warning(
+                "%s: the tuner returned no per-fold boosters, so the production round count is "
+                "the %d-round default rather than what the folds settled on", endpoint.key, rounds,
+            )
     else:
         merged = tuning.default_params(
             endpoint.task, endpoint.metric, train_rows.size, num_threads=num_threads, seed=seed

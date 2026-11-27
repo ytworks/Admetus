@@ -107,8 +107,10 @@ class TuneResult:
         n_trials: Trials completed in the study.
         seed: Sampler seed, recorded so the run is reproducible.
         time_budget: Wall-clock cap applied, if any.
-        boosters: Per-fold boosters from the best trial, used for out-of-fold
-            predictions. Not shipped: the production ensemble is refitted.
+        boosters: Per-fold boosters from the best trial, used only to pick the
+            production round count. Not shipped: the ensemble is refitted. Empty when
+            the tuner could not recover them, which the caller must notice rather
+            than quietly accept a default.
         tuned_keys: Which parameters the tuner chose, as opposed to our rules.
     """
 
@@ -143,6 +145,19 @@ class TuneResult:
 #: Where resumable tuning studies live, beside the model directory rather than
 #: inside it.
 STUDIES_DIR = "studies"
+
+
+def booster_dir(models_dir: Path, key: str) -> Path:
+    """Where the tuner keeps each trial's per-fold boosters.
+
+    ``LightGBMTunerCV`` holds the best trial's boosters in memory unless it is given
+    somewhere to put them, and a resumed study has no memory of the run that found
+    them. Without this, ``get_best_booster`` on a resumed study raises and the
+    production round count silently falls back to its default instead of coming from
+    what the folds settled on -- which only became reachable once the study survived
+    a successful run at all.
+    """
+    return Path(models_dir) / STUDIES_DIR / f"{key}-boosters"
 
 
 def study_path(models_dir: Path, key: str) -> Path:
@@ -219,6 +234,7 @@ def auto_tune(
     time_budget: int | None = DEFAULT_TIME_BUDGET_SECONDS,
     storage: Path | None = None,
     study_name: str = "admetus",
+    model_dir: Path | None = None,
 ) -> TuneResult:
     """Tune hyperparameters with the stepwise LightGBM tuner.
 
@@ -232,6 +248,8 @@ def auto_tune(
         time_budget: Wall-clock cap in seconds, or ``None`` for no cap.
         storage: SQLite path for a resumable study.
         study_name: Study name inside the storage.
+        model_dir: Where the tuner persists per-trial boosters, so a resumed study
+            can still produce the best trial's folds.
 
     Returns:
         The :class:`TuneResult`, including the per-fold boosters of the best
@@ -265,10 +283,14 @@ def auto_tune(
     fold_pairs = [(f.train, f.test) for f in folds]
     dataset = lgb.Dataset(matrix, label=y, params=params, free_raw_data=False)
 
+    if model_dir is not None:
+        Path(model_dir).mkdir(parents=True, exist_ok=True)
+
     tuner = LightGBMTunerCV(
         dict(params),
         dataset,
         folds=fold_pairs,
+        model_dir=str(model_dir) if model_dir else None,
         num_boost_round=TUNER_MAX_ROUNDS,
         callbacks=[lgb.early_stopping(TUNER_EARLY_STOPPING, verbose=False)],
         time_budget=time_budget,
@@ -332,6 +354,7 @@ def default_params(task: str, metric: str, n_train: int, num_threads: int = 0, s
 __all__ = [
     "BALANCED_POS_RATE",
     "STUDIES_DIR",
+    "booster_dir",
     "DEFAULT_TIME_BUDGET_SECONDS",
     "MAXIMIZE_METRICS",
     "SEVERE_POS_RATE",
