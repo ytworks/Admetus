@@ -138,6 +138,12 @@ def predict_command(
                     handle.write(f'"{escaped}"\n')
             input_path = temporary
 
+        # `--json` with no -o has to hold every row to put it in the document, so the
+        # cap belongs to the run rather than to the reporting afterwards. Checked at
+        # the end, a 10,001-row input finished every prediction, wrote a report saying
+        # ok with 10,001 rows, threw the predictions away and exited 2: work paid for,
+        # nothing delivered, and a report that disagreed with the outcome.
+        inline_json = as_json and destination is None
         options = runner.Options(
             smiles_column=smiles_column,
             jobs=jobs if jobs is not None else default_jobs(),
@@ -154,6 +160,7 @@ def predict_command(
             max_failures=max_failures,
             sep=sep,
             encoding=encoding,
+            max_rows=MAX_JSON_ROWS if inline_json else None,
         )
 
         # `--json` has to produce one JSON document. It used to write the CSV to
@@ -161,7 +168,6 @@ def predict_command(
         # on the first character and the report alone carried no predictions. With
         # no -o, the CSV is written to a temporary file and its rows go into the
         # document; with -o, the file gets the CSV and standard output the report.
-        inline_json = as_json and destination is None
         out_path = destination
         json_csv: Path | None = None
         if inline_json:
@@ -185,12 +191,6 @@ def predict_command(
         payload = _report_payload(report, models, input_path, out_path if not inline_json else None)
         if inline_json:
             try:
-                if report.n_rows > MAX_JSON_ROWS:
-                    raise UsageError(
-                        f"{report.n_rows} rows is too many to return inline as JSON (the limit is "
-                        f"{MAX_JSON_ROWS}). Pass -o/--output to write the CSV, and --json then "
-                        "prints the report alone."
-                    )
                 payload["predictions"] = _rows_from_csv(json_csv, report, options)
             finally:
                 json_csv.unlink(missing_ok=True)
@@ -230,12 +230,32 @@ def _coerce(value: str):
 
 
 def _rows_from_csv(path: Path, report, options: runner.Options) -> list[dict]:
-    """Read the written CSV back as JSON rows."""
+    """Read the written CSV back as JSON rows.
+
+    A JSON object is keyed by name, so a duplicate column name cannot survive it: the
+    second value overwrote the first, which turned the header ``smiles,note,note``
+    into a row carrying only the last ``note``. Losing input data to make a
+    convenience shape is worse than refusing the shape, and the CSV path keeps every
+    column, so that is where such a file is sent.
+
+    Raises:
+        UsageError: The header repeats a column name.
+    """
     from admetus.predict import csvio
 
     dialect = csvio.sniff(path, encoding=options.encoding, sep=options.sep)
     records = csvio.read_records(path, dialect)
     header = next(records).fields
+    seen: dict[str, int] = {}
+    for name in header:
+        seen[name] = seen.get(name, 0) + 1
+    repeated = sorted(name for name, count in seen.items() if count > 1)
+    if repeated:
+        raise UsageError(
+            f"the input repeats the column name(s) {', '.join(repr(r) for r in repeated)}, which "
+            "cannot be represented as JSON objects without dropping a value. Pass -o/--output to "
+            "write the CSV, which keeps every column, and --json then prints the report alone."
+        )
     added = set(report.added_columns)
     rows: list[dict] = []
     for record in records:

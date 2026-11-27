@@ -103,8 +103,56 @@ def read_metadata(directory: Path) -> dict[str, Any]:
         raise ModelError(f"{path} is not readable JSON: {exc}") from exc
 
 
-def verify(directory: Path, check_fingerprint: bool = True) -> tuple[bool, list[str]]:
+#: The last section a complete LightGBM text model carries. A file cut short keeps
+#: valid-looking tree lines and loses this, which is the shape a partial copy or a
+#: half-finished download has. Only the trailer is required: the marker that closes
+#: the tree list sits before the feature-importance and parameter sections, which on
+#: a wide model are themselves larger than any tail worth reading.
+BOOSTER_TRAILER = "end of parameters"
+
+#: How much of the end of a booster file to read when checking it is whole. The
+#: trailer sits in the last few hundred bytes; reading the whole 37 MB of a large
+#: model to find it would make verification cost more than loading it.
+BOOSTER_TAIL_BYTES = 8192
+
+
+def _booster_problem(path: Path) -> str | None:
+    """Say why a booster file is not a whole model, or ``None`` when it looks whole."""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as handle:
+            head = handle.read(64)
+            handle.seek(max(0, size - BOOSTER_TAIL_BYTES))
+            tail = handle.read()
+    except OSError as exc:  # pragma: no cover - unreadable file
+        return f"could not be read: {exc}"
+    if not head.startswith(b"tree"):
+        return "does not start like a LightGBM text model"
+    text = tail.decode("utf-8", errors="replace")
+    if BOOSTER_TRAILER not in text:
+        return (
+            "is cut short: a complete model ends with its parameter section, and this "
+            "one does not. It would fail at the first prediction."
+        )
+    return None
+
+
+def verify(
+    directory: Path, check_fingerprint: bool = True, check_boosters: bool = True
+) -> tuple[bool, list[str]]:
     """Check a bundle without loading it for prediction.
+
+    Args:
+        directory: The bundle.
+        check_fingerprint: Fingerprint the golden molecules, which catches an RDKit
+            change that moved bit positions.
+        check_boosters: Check that every booster file is a whole model. Counting
+            them is not enough: a truncated fold file passed the count and then
+            failed at the first prediction, after the bundle had already replaced a
+            working one. The check is structural rather than a load, because
+            LightGBM's parser aborts the process on a truncated model -- it raises
+            from C++ through a path Python cannot catch -- so handing it a file that
+            might be broken is not an option inside a verifier.
 
     Returns:
         ``(ok, problems)``.
@@ -139,6 +187,12 @@ def verify(directory: Path, check_fingerprint: bool = True) -> tuple[bool, list[
     found = sum(1 for i in range(expected) if (directory / BOOSTER_PATTERN.format(index=i)).is_file())
     if found != expected:
         problems.append(f"expected {expected} booster file(s), found {found}")
+    elif check_boosters:
+        for index in range(expected):
+            path = directory / BOOSTER_PATTERN.format(index=index)
+            problem = _booster_problem(path)
+            if problem:
+                problems.append(f"{path.name} {problem}")
 
     if check_fingerprint:
         recorded = featurizer.get("golden_fingerprint")
@@ -173,7 +227,9 @@ def load(directory: str, check_fingerprint: bool = True) -> LoadedModel:
     featurizer = meta["featurizer"]
     spec = FeaturizerSpec.from_dict(featurizer["spec"])
 
-    ok, problems = verify(path, check_fingerprint=check_fingerprint)
+    # The boosters are loaded immediately below, so verifying them here would read
+    # every file twice.
+    ok, problems = verify(path, check_fingerprint=check_fingerprint, check_boosters=False)
     if not ok:
         raise SpecMismatchError(
             f"model bundle at {path} cannot be used here:\n  - " + "\n  - ".join(problems)

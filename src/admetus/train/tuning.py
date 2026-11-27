@@ -147,17 +147,21 @@ class TuneResult:
 STUDIES_DIR = "studies"
 
 
-def booster_dir(models_dir: Path, key: str) -> Path:
-    """Where the tuner keeps each trial's per-fold boosters.
+def booster_dir(models_dir: Path, study: str) -> Path:
+    """Where one study keeps each trial's per-fold boosters.
 
     ``LightGBMTunerCV`` holds the best trial's boosters in memory unless it is given
     somewhere to put them, and a resumed study has no memory of the run that found
     them. Without this, ``get_best_booster`` on a resumed study raises and the
-    production round count silently falls back to its default instead of coming from
-    what the folds settled on -- which only became reachable once the study survived
-    a successful run at all.
+    production round count silently falls back to its default.
+
+    Keyed by the **study**, not by the endpoint. One directory per endpoint let a run
+    under a different feature set overwrite the file belonging to another study's
+    winning trial: the first study kept its score and its 65 trials, and its resumed
+    ensemble came back at 350 rounds instead of 143, having loaded somebody else's
+    booster. Each study now gets its own.
     """
-    return Path(models_dir) / STUDIES_DIR / f"{key}-boosters"
+    return Path(models_dir) / STUDIES_DIR / f"{study}-boosters"
 
 
 def study_path(models_dir: Path, key: str) -> Path:
@@ -174,14 +178,27 @@ def study_path(models_dir: Path, key: str) -> Path:
     return Path(models_dir) / STUDIES_DIR / f"{key}.sqlite"
 
 
-def study_name(key: str, feature_set: str, n_columns: int, n_folds: int, params: dict[str, Any]) -> str:
+def study_name(
+    key: str,
+    feature_set: str,
+    n_columns: int,
+    n_folds: int,
+    params: dict[str, Any],
+    seed: int = 0,
+    fold_signature: str = "",
+) -> str:
     """Name a study after the settings that decide whether its trials still apply.
 
     Resuming is only sound while the search is over the same thing. A different
-    feature set, a different column count after pruning, a different fold count or a
-    different objective all change what a trial's score means, so each gets its own
-    study inside the same database rather than adding trials to one that measured
-    something else.
+    feature set, column count, fold count or objective all change what a trial's
+    score means, so each gets its own study rather than adding trials to one that
+    measured something else.
+
+    The seed and the fold assignment are part of that identity, and leaving them out
+    was wrong in a way that falsified the record: ``--seed 73`` resumed the seed-0
+    study, reported ``sampler_seed: 73`` in the bundle, and shipped parameters that
+    still carried seed 0. A study is now per seed, and ``fold_signature`` pins the
+    actual partition so a study is never extended against different folds.
     """
     import hashlib
 
@@ -194,6 +211,8 @@ def study_name(key: str, feature_set: str, n_columns: int, n_folds: int, params:
             params.get("metric"),
             round(float(params.get("scale_pos_weight", 1.0)), 4),
             params.get("learning_rate"),
+            seed,
+            fold_signature,
         )
     )
     digest = hashlib.blake2b(signature.encode(), digest_size=5).hexdigest()

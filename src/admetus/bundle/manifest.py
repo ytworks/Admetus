@@ -39,6 +39,7 @@ from admetus.bundle.save import BUNDLE_FILE
 from admetus.data.download import fetch, sha256_file
 from admetus.errors import ModelError, NetworkError
 from admetus.logging import get_logger
+from admetus.train.tuning import STUDIES_DIR
 from admetus.version import SCHEMA_VERSION, get_version
 
 log = get_logger("bundle.manifest")
@@ -259,6 +260,10 @@ def read_manifest(source: str, directory: Path) -> tuple[dict[str, Any], str]:
 #: checked rather than trusted.
 ENDPOINT_KEY = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
+#: Directories the project keeps for itself under the models directory, which an
+#: endpoint key must therefore not be.
+RESERVED_NAMES = frozenset({STUDIES_DIR})
+
 
 def _checked_endpoint(value: Any) -> str:
     """Return a manifest endpoint key, or refuse it.
@@ -266,11 +271,29 @@ def _checked_endpoint(value: Any) -> str:
     The key becomes a directory name under the models directory, so a key like
     ``../../etc`` would write outside it. Refusing the shape is cheaper and more
     obvious than normalizing and then hoping the containment check catches it.
+
+    Shape is not enough on its own, because the models directory also holds the
+    tuning store, and ``studies`` is a perfectly well-shaped key: a manifest naming
+    it would have the installer treat its own search history as a replaceable model
+    directory and delete it. Names the project uses for itself are reserved, and the
+    key has to be one the registry actually publishes.
     """
     if not isinstance(value, str) or not ENDPOINT_KEY.match(value):
         raise NetworkError(
             f"the manifest names an endpoint {value!r} that is not a usable key. "
             "A key is lowercase letters, digits and underscores."
+        )
+    if value in RESERVED_NAMES:
+        raise NetworkError(
+            f"the manifest names an endpoint {value!r}, which is a directory this project "
+            "keeps for itself under the models directory."
+        )
+    from admetus.data.registry import load_registry
+
+    if value not in load_registry():
+        raise NetworkError(
+            f"the manifest names an endpoint {value!r} that is not in this install's registry, "
+            "so there is nowhere for it to be used from."
         )
     return value
 
@@ -413,8 +436,16 @@ def install(
             continue
 
         # Verified at the staging path, so a candidate that does not load here never
-        # displaces a bundle that does.
+        # displaces a bundle that does. Every booster is loaded, not just counted: a
+        # truncated fold file passed a count and failed at the first prediction,
+        # after the working bundle was gone.
         ok, problems = verify(staging, check_fingerprint=True)
+        if ok and (read_metadata(staging).get("endpoint") or {}).get("key") != endpoint:
+            ok = False
+            problems = [
+                f"the archive's bundle is for "
+                f"{(read_metadata(staging).get('endpoint') or {}).get('key')!r}, not {endpoint!r}"
+            ]
         if not ok:
             shutil.rmtree(staging, ignore_errors=True)
             log.error("%s does not verify here, so it was not installed: %s", endpoint, "; ".join(problems))

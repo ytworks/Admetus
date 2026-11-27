@@ -72,6 +72,10 @@ class Options:
     sep: str | None = None
     encoding: str = "utf-8"
     precision: int = 6
+    #: Stop with an error once the input passes this many rows. Set by the caller
+    #: that has to hold every row in memory afterwards, so the refusal lands before
+    #: the work rather than after it.
+    max_rows: int | None = None
 
 
 @dataclass
@@ -299,6 +303,12 @@ def run(
             # so a short row's prediction lands in the column the header names.
             padding = [ragged.check(record, n_header, source) for record in chunk]
             report.n_rows += len(chunk)
+            if options.max_rows is not None and report.n_rows > options.max_rows:
+                raise InputDataError(
+                    f"{source.name} has more than {options.max_rows} rows, which is too many to "
+                    "return inline as JSON. Pass -o/--output to write the CSV, and --json then "
+                    "prints the report alone."
+                )
 
             raw = [
                 record.fields[smiles_at].strip() if smiles_at < len(record.fields) else ""

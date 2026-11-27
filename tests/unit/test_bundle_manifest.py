@@ -20,9 +20,23 @@ import pytest
 from admetus.bundle import manifest as mf
 from admetus.errors import ModelError, NetworkError
 
+#: A booster file's shape, which `verify` checks structurally because LightGBM's
+#: parser aborts the process on a truncated model rather than raising. Not loadable,
+#: and it does not need to be: these tests are about digests and refusals.
+STUB_BOOSTER = (
+    "tree\nversion=v4\nnum_class=1\n\nTree=0\nnum_leaves=1\n\n"
+    "end of trees\n\nfeature_importances:\n\nparameters:\n[boosting: gbdt]\n"
+    "end of parameters\n\npandas_categorical:null\n"
+)
 
-def make_bundle(models_dir, key="fixture", n_boosters=1, golden=None):
-    """Write a directory that verifies, fingerprint included unless told otherwise."""
+
+def make_bundle(models_dir, key="dili", n_boosters=1, golden=None):
+    """Write a directory that verifies, fingerprint included unless told otherwise.
+
+    Keyed to a real endpoint, because a manifest may only name one the registry
+    publishes: the models directory also holds the tuning store, and a well-shaped
+    key like `studies` would have the installer delete its own search history.
+    """
     from admetus.bundle.save import golden_fingerprint
     from admetus.chem.spec import get_spec
 
@@ -38,7 +52,7 @@ def make_bundle(models_dir, key="fixture", n_boosters=1, golden=None):
         popcount=np.zeros(2, dtype=np.int32),
     )
     for index in range(n_boosters):
-        (directory / f"fold_{index}.txt").write_text("tree\n", encoding="utf-8")
+        (directory / f"fold_{index}.txt").write_text(STUB_BOOSTER, encoding="utf-8")
     # A training by-product that must not be published.
     (directory / "optuna.sqlite").write_bytes(b"not a model")
     (directory / "bundle.json").write_text(
@@ -76,7 +90,7 @@ def test_packaging_writes_a_manifest_naming_every_file_and_its_digest(tmp_path):
 
     assert manifest["n_bundles"] == 1
     entry = manifest["bundles"][0]
-    assert entry["endpoint"] == "fixture"
+    assert entry["endpoint"] == "dili"
     assert entry["archive_sha256"] and len(entry["archive_sha256"]) == 64
     names = sorted(f["name"] for f in entry["files"])
     assert names == ["ad_reference.npz", "bundle.json", "columns.npz", "fold_0.txt"]
@@ -90,7 +104,7 @@ def test_the_study_database_is_not_published(tmp_path):
     models = tmp_path / "models"
     make_bundle(models)
     mf.build(models, tmp_path / "dist")
-    with tarfile.open(tmp_path / "dist" / "fixture.tar.gz") as tar:
+    with tarfile.open(tmp_path / "dist" / "dili.tar.gz") as tar:
         assert not any(name.endswith(".sqlite") for name in tar.getnames())
 
 
@@ -133,7 +147,7 @@ def test_install_round_trips_the_bundle(tmp_path):
 
     assert [r["installed"] for r in results] == [True]
     assert results[0]["ok"] is True
-    installed = tmp_path / "installed" / "fixture"
+    installed = tmp_path / "installed" / "dili"
     assert sorted(p.name for p in installed.iterdir()) == [
         "ad_reference.npz", "bundle.json", "columns.npz", "fold_0.txt"
     ]
@@ -147,14 +161,14 @@ def test_an_already_installed_bundle_is_left_alone(tmp_path):
 
     mf.install(manifest, base, tmp_path / "installed", tmp_path / "cache")
     again = mf.install(manifest, base, tmp_path / "installed", tmp_path / "cache")
-    assert again == [{"endpoint": "fixture", "installed": False, "reason": "already present"}]
+    assert again == [{"endpoint": "dili", "installed": False, "reason": "already present"}]
 
 
 def test_an_archive_whose_digest_disagrees_is_not_unpacked(tmp_path):
     models = tmp_path / "models"
     make_bundle(models)
     mf.build(models, tmp_path / "dist")
-    archive = tmp_path / "dist" / "fixture.tar.gz"
+    archive = tmp_path / "dist" / "dili.tar.gz"
     archive.write_bytes(archive.read_bytes() + b"tampered")
 
     manifest, base = mf.read_manifest(str(tmp_path / "dist"), tmp_path / "cache")
@@ -162,14 +176,14 @@ def test_an_archive_whose_digest_disagrees_is_not_unpacked(tmp_path):
 
     assert results[0]["installed"] is False
     assert "digest" in results[0]["reason"]
-    assert not (tmp_path / "installed" / "fixture").exists()
+    assert not (tmp_path / "installed" / "dili").exists()
 
 
 def test_an_archive_member_outside_the_bundle_is_refused(tmp_path):
     """A manifest can be honest about bytes that still hold a hostile path."""
     dist = tmp_path / "dist"
     dist.mkdir()
-    archive = dist / "fixture.tar.gz"
+    archive = dist / "dili.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
         payload = tmp_path / "payload"
         payload.write_text("x", encoding="utf-8")
@@ -180,7 +194,7 @@ def test_an_archive_member_outside_the_bundle_is_refused(tmp_path):
     manifest = {
         "manifest_version": 1, "n_bundles": 1,
         "bundles": [{
-            "endpoint": "fixture", "archive": "fixture.tar.gz",
+            "endpoint": "dili", "archive": "dili.tar.gz",
             "archive_sha256": sha256_file(archive), "archive_bytes": archive.stat().st_size,
             "files": [],
         }],
@@ -211,8 +225,8 @@ def test_asking_the_manifest_for_an_endpoint_it_lacks_is_refused(tmp_path):
     make_bundle(models)
     mf.build(models, tmp_path / "dist")
     manifest, base = mf.read_manifest(str(tmp_path / "dist"), tmp_path / "cache")
-    with pytest.raises(ModelError, match="no bundle for dili"):
-        mf.install(manifest, base, tmp_path / "installed", tmp_path / "cache", keys=["dili"])
+    with pytest.raises(ModelError, match="no bundle for herg"):
+        mf.install(manifest, base, tmp_path / "installed", tmp_path / "cache", keys=["herg"])
 
 
 def test_a_candidate_that_does_not_verify_never_replaces_a_working_bundle(tmp_path):
@@ -235,7 +249,7 @@ def test_a_candidate_that_does_not_verify_never_replaces_a_working_bundle(tmp_pa
     installed = tmp_path / "installed"
     good, base = mf.read_manifest(str(tmp_path / "dist"), tmp_path / "cache")
     mf.install(good, base, installed, tmp_path / "cache")
-    working = (installed / "fixture" / "bundle.json").read_text()
+    working = (installed / "dili" / "bundle.json").read_text()
 
     bad, bad_base = mf.read_manifest(str(tmp_path / "bad"), tmp_path / "cache")
     results = mf.install(bad, bad_base, installed, tmp_path / "cache", overwrite=True)
@@ -244,7 +258,7 @@ def test_a_candidate_that_does_not_verify_never_replaces_a_working_bundle(tmp_pa
     assert results[0]["ok"] is False
     assert "nothing was replaced" in results[0]["reason"]
     # The working bundle is untouched, and no staging directory is left behind.
-    assert (installed / "fixture" / "bundle.json").read_text() == working
+    assert (installed / "dili" / "bundle.json").read_text() == working
     assert not list(installed.glob(".*.incoming"))
 
 
@@ -292,7 +306,7 @@ def test_a_manifest_archive_name_that_is_a_path_is_refused(tmp_path):
     (dist / mf.MANIFEST_FILE).write_text(
         _json.dumps({
             "manifest_version": 1, "n_bundles": 1,
-            "bundles": [{"endpoint": "fixture", "archive": "../../etc/passwd",
+            "bundles": [{"endpoint": "dili", "archive": "../../etc/passwd",
                          "archive_sha256": "0" * 64, "archive_bytes": 1, "files": []}],
         }),
         encoding="utf-8",
@@ -300,3 +314,87 @@ def test_a_manifest_archive_name_that_is_a_path_is_refused(tmp_path):
     manifest, base = mf.read_manifest(str(dist), tmp_path / "cache")
     with pytest.raises(NetworkError, match="not a plain filename"):
         mf.install(manifest, base, tmp_path / "installed", tmp_path / "cache")
+
+
+def test_a_truncated_fold_is_caught_before_it_replaces_anything(tmp_path):
+    """Counting fold files is not checking them.
+
+    A bundle with one truncated fold packaged and installed cleanly, both commands
+    exiting 0, and then the prediction that worked before the update failed with
+    `LightGBMError: Unknown model format` -- after the working bundle was gone.
+    """
+    models = tmp_path / "models"
+    directory = make_bundle(models)
+    fold = directory / "fold_0.txt"
+    fold.write_text(fold.read_text().split("end of trees")[0], encoding="utf-8")
+
+    with pytest.raises(ModelError, match="cut short"):
+        mf.build(models, tmp_path / "dist")
+
+
+def test_the_tuning_store_cannot_be_named_as_an_endpoint(tmp_path):
+    """`studies` is a well-shaped key and a directory this project owns."""
+    import json as _json
+
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / mf.MANIFEST_FILE).write_text(
+        _json.dumps({
+            "manifest_version": 1, "n_bundles": 1,
+            "bundles": [{"endpoint": "studies", "archive": "studies.tar.gz",
+                         "archive_sha256": "0" * 64, "archive_bytes": 1, "files": []}],
+        }),
+        encoding="utf-8",
+    )
+    manifest, base = mf.read_manifest(str(dist), tmp_path / "cache")
+    with pytest.raises(NetworkError, match="keeps for itself"):
+        mf.install(manifest, base, tmp_path / "installed", tmp_path / "cache")
+
+
+def test_an_archive_whose_bundle_is_for_another_endpoint_is_refused(tmp_path):
+    """Correct member names are not proof of correct contents.
+
+    The member-path check catches an archive whose files sit under the wrong
+    directory. This is the case it cannot catch: members named for the endpoint being
+    installed, holding a record that says it is a different model.
+    """
+    import gzip
+    import io
+    import json as _json
+
+    from admetus.data.download import sha256_file
+
+    models = tmp_path / "models"
+    directory = make_bundle(models, key="dili")
+
+    # Repack dili's files as if they were herg's, member names included.
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w") as tar:
+        for path in sorted(directory.iterdir()):
+            if path.suffix not in (".json", ".npz", ".txt"):
+                continue
+            info = tar.gettarinfo(str(path), arcname=f"herg/{path.name}")
+            with path.open("rb") as handle:
+                tar.addfile(info, handle)
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    archive = dist / "herg.tar.gz"
+    with archive.open("wb") as out, gzip.GzipFile(fileobj=out, mode="wb", mtime=0) as gz:
+        gz.write(raw.getvalue())
+
+    (dist / mf.MANIFEST_FILE).write_text(
+        _json.dumps({
+            "manifest_version": 1, "n_bundles": 1,
+            "bundles": [{"endpoint": "herg", "archive": "herg.tar.gz",
+                         "archive_sha256": sha256_file(archive),
+                         "archive_bytes": archive.stat().st_size, "files": []}],
+        }),
+        encoding="utf-8",
+    )
+
+    manifest, base = mf.read_manifest(str(dist), tmp_path / "cache")
+    results = mf.install(manifest, base, tmp_path / "installed", tmp_path / "cache")
+
+    assert results[0]["installed"] is False
+    assert "not 'herg'" in results[0]["problems"][0]
+    assert not (tmp_path / "installed" / "herg").exists()

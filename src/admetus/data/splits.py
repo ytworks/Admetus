@@ -283,6 +283,22 @@ def cv_folds(
     )
 
 
+def fold_signature(folds: list[Split]) -> str:
+    """A short digest of an actual fold partition.
+
+    Part of a tuning study's identity: trials are only comparable while they were
+    scored against the same validation rows, and a fold count alone does not say
+    that. Built from each fold's held-out rows, in fold order.
+    """
+    import hashlib
+
+    digest = hashlib.blake2b(digest_size=6)
+    for fold in folds:
+        digest.update(np.asarray(fold.test, dtype=np.int64).tobytes())
+        digest.update(b"|")
+    return digest.hexdigest()
+
+
 def fold_report(folds: list[Split], y: np.ndarray, task: str) -> list[dict[str, object]]:
     """Summarize each fold, for the training log and the bundle record."""
     out: list[dict[str, object]] = []
@@ -308,6 +324,7 @@ __all__ = [
     "check_group_sizes",
     "cv_folds",
     "fold_report",
+    "fold_signature",
     "murcko_framework",
     "murcko_scaffold",
     "scaffold_groups",

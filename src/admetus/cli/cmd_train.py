@@ -193,12 +193,25 @@ def evaluate_command(
             path = directory / endpoint.key
             meta = read_metadata(path)
             metrics = meta.get("metrics") or {}
+            # A record written before the shipped cutoff was evaluated carries only
+            # `mcc_at_best_threshold`, which was chosen by searching the held-out
+            # labels. Reporting it unlabelled invites reading an oracle's score as
+            # the model's: on hERG it reads 0.63 where the shipped cutoff gives 0.56.
+            legacy_mcc = (
+                "mcc" not in metrics and "mcc_at_best_threshold" in metrics
+            )
             rows.append({
                 "endpoint": endpoint.key,
                 "metric": endpoint.metric,
                 "in_official_group": endpoint.in_official_group,
                 "primary": metrics.get("primary"),
                 "all_metrics": {k: v for k, v in metrics.items() if k != "primary"},
+                "mcc_is_retrospective_only": legacy_mcc,
+                "mcc_note": (
+                    "this bundle predates evaluation at the shipped cutoff, so its only MCC was "
+                    "chosen by searching the held-out labels and is not a score this model can "
+                    "deliver. Retrain to record MCC at the cutoff the bundle ships."
+                ) if legacy_mcc else None,
                 "cv_score_biased": (meta.get("cross_validation") or {}).get("cv_score_biased", True),
                 "interval_coverage": metrics.get("interval_coverage"),
                 "low_confidence": metrics.get("low_confidence"),
@@ -236,6 +249,8 @@ def evaluate_command(
                 f"[{primary.get('ci_low', float('nan')):.4f}, {primary.get('ci_high', float('nan')):.4f}]"
             )
             notes = []
+            if row["mcc_is_retrospective_only"]:
+                notes.append("MCC is retrospective only")
             if row["low_confidence"]:
                 notes.append("small dataset")
             if row["interval_coverage"] is not None:

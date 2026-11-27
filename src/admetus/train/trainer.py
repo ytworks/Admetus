@@ -330,13 +330,15 @@ def train_endpoint(
             "%s: tuning over %d fold(s), %d train rows, %d columns (budget %ss)",
             endpoint.key, len(fold_sets), train_rows.size, basis.n_cols, time_budget,
         )
+        study = tuning.study_name(
+            endpoint.key, spec.feature_set, basis.n_cols, len(fold_sets), params,
+            seed=seed, fold_signature=splits.fold_signature(fold_sets),
+        )
         tuned = tuning.auto_tune(
             x_train, y_train, fold_sets, params, seed=seed, time_budget=time_budget,
             storage=tuning.study_path(models_dir, endpoint.key) if models_dir else None,
-            model_dir=tuning.booster_dir(models_dir, endpoint.key) if models_dir else None,
-            study_name=tuning.study_name(
-                endpoint.key, spec.feature_set, basis.n_cols, len(fold_sets), params
-            ),
+            model_dir=tuning.booster_dir(models_dir, study) if models_dir else None,
+            study_name=study,
         )
         merged = tuned.params
         tune_record = tuned.to_dict()
