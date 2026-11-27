@@ -4,7 +4,7 @@ Cross-session memory for Admetus: what exists, what is measured, what is not don
 and what to pick up next. Read this first, then `CLAUDE.md`.
 
 Last updated: 2026-11-27. Branch `feat/core-featurizer-and-data`, draft PR #1.
-187 tests pass locally on macOS and in CI on Ubuntu for Python 3.12 and 3.13.
+188 tests pass locally and in CI on Ubuntu and macOS for Python 3.12 and 3.13.
 
 ## State
 
@@ -24,7 +24,7 @@ empty rather than estimated.
 | `bundle/` save and load with spec verification | done, tested |
 | `predict/` byte-preserving CSV, runner | done, tested |
 | `cli/` doctor, endpoints, data, train, evaluate, predict, models | done |
-| CI and Docker | exercised on the branch. Lint, the README pair check and the Ubuntu test matrix pass; the Docker image builds and its smoke tests pass. macOS runners were cancelled on an unschedulable `macos-14` label and are now on `macos-latest`, pending confirmation |
+| CI and Docker | green on the branch: lint, the README pair check, the Ubuntu and macOS test matrices for Python 3.12 and 3.13, and the Docker image with its smoke tests |
 | README in English and Japanese | done, pair check passes |
 | Trained models and accuracy numbers | **not done** |
 
@@ -48,11 +48,9 @@ empty rather than estimated.
 4. **Publish model bundles.** The release side of section 7 is unwritten: no
    `models pull`, no manifest, no release workflow for bundles. `admetus models`
    currently only lists and shows what is local.
-5. **Confirm the macOS CI matrix.** Ubuntu, lint and the Docker build all pass.
-   The macOS jobs were cancelled before running a step, which is what an
-   unschedulable runner label looks like rather than a test failure; the label is
-   now `macos-latest` and the next run should confirm it. Nothing has yet verified
-   the project on macOS *in CI*, though all 187 tests pass on macOS locally.
+5. **Publish model bundles** is the only structural gap left, listed above as
+   item 4. CI covers both platforms now, so nothing else is outstanding on the
+   infrastructure side.
 
 ## Decisions worth not relitigating
 
@@ -93,6 +91,11 @@ Each of these was measured, and several contradict what the plan originally said
   present, which is the normal state of a fresh checkout. The CI self-check
   accepts 0 and 3 and fails on anything else, since 1 means a broken install.
   A naive `run: admetus doctor` fails the build.
+- A runner label that cannot be scheduled cancels its jobs before any step runs,
+  with no log. That looks nothing like a test failure; `macos-14` did this and
+  `macos-latest` fixed it.
+- `concurrency: cancel-in-progress: true` cancels the previous run on every
+  push, so a run marked cancelled after a quick follow-up push is expected.
 - Remediation strings must name commands that exist. `doctor` and the bundle
   loader used to suggest `admetus models pull`, which is not implemented;
   pointing an automated caller at a missing command is worse than saying nothing.

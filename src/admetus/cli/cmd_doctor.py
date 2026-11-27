@@ -70,18 +70,21 @@ def _cpu_status() -> dict[str, object]:
     usable = counter() if counter else os.cpu_count()
     info: dict[str, object] = {"cpu_count": os.cpu_count(), "usable_cpus": usable}
     if platform.system() == "Darwin":
-        try:
-            import subprocess
+        # Apple silicon reports its core types as performance levels. A virtual
+        # machine may expose one level or none, so each is probed independently
+        # and a missing one is simply absent rather than an error.
+        import subprocess
 
-            for level, label in ((0, "performance_cores"), (1, "efficiency_cores")):
+        for level, label in ((0, "performance_cores"), (1, "efficiency_cores")):
+            try:
                 out = subprocess.run(
                     ["sysctl", "-n", f"hw.perflevel{level}.logicalcpu"],
                     capture_output=True, text=True, check=False, timeout=5,
                 )
-                if out.returncode == 0 and out.stdout.strip():
-                    info[label] = int(out.stdout.strip())
-        except Exception:  # pragma: no cover - informational only
-            pass
+            except (OSError, subprocess.SubprocessError):  # pragma: no cover - informational
+                break
+            if out.returncode == 0 and out.stdout.strip().isdigit():
+                info[label] = int(out.stdout.strip())
     return info
 
 
@@ -156,8 +159,15 @@ def doctor_command(ctx: click.Context, as_json: bool, models_dir: Path | None) -
                 click.echo(f"chemistry  PROBLEM: {chemistry.get('error')}")
             cpu = report["cpu"]
             cores = f"{cpu['usable_cpus']} usable of {cpu['cpu_count']}"
-            if "performance_cores" in cpu:
-                cores += f" ({cpu['performance_cores']} performance, {cpu['efficiency_cores']} efficiency)"
+            # A macOS VM may expose one performance level and no efficiency level,
+            # so neither key can be assumed from the presence of the other.
+            split = [
+                f"{cpu[key]} {label}"
+                for key, label in (("performance_cores", "performance"), ("efficiency_cores", "efficiency"))
+                if key in cpu
+            ]
+            if split:
+                cores += f" ({', '.join(split)})"
             click.echo(f"cpu        {cores}")
             click.echo(
                 f"models     {len(present)} of {len(registry)} available in {directory}"

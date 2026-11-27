@@ -154,3 +154,31 @@ def test_evaluate_requires_a_bundle_not_just_a_directory(tmp_path):
     (tmp_path / "dili").mkdir()
     (tmp_path / "dili" / "optuna.sqlite").write_bytes(b"not a bundle")
     assert available(tmp_path) == []
+
+
+def test_doctor_reports_cores_when_a_level_is_missing():
+    """A macOS VM can expose one performance level and no efficiency level.
+
+    doctor is the first command a new machine runs, so it must not crash on a
+    partially reported core topology. This failed in CI with
+    KeyError: 'efficiency_cores'.
+    """
+    from click.testing import CliRunner
+
+    from admetus.cli import cmd_doctor
+    from admetus.cli.main import cli
+
+    for cpu in (
+        {"cpu_count": 4, "usable_cpus": 4},
+        {"cpu_count": 4, "usable_cpus": 4, "performance_cores": 4},
+        {"cpu_count": 4, "usable_cpus": 4, "efficiency_cores": 4},
+        {"cpu_count": 10, "usable_cpus": 9, "performance_cores": 4, "efficiency_cores": 6},
+    ):
+        original = cmd_doctor._cpu_status
+        cmd_doctor._cpu_status = lambda c=cpu: dict(c)
+        try:
+            result = CliRunner().invoke(cli, ["doctor"])
+        finally:
+            cmd_doctor._cpu_status = original
+        assert "internal error" not in result.output, (cpu, result.output)
+        assert "cpu " in result.output
