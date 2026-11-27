@@ -37,7 +37,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from admetus.data.registry import HIGHER_IS_BETTER, all_endpoints
+from admetus.data.registry import HIGHER_IS_BETTER, all_endpoints, feature_set_from_size
 
 #: Every candidate feature space, narrowest first.
 FEATURE_SETS = ("morgan", "morgan_p2", "morgan_p23")
@@ -159,7 +159,7 @@ def decide(key: str, default_set: str, scores: dict[str, list[float]], metric: s
 def markdown(decisions: list[dict]) -> str:
     """Render the study as the table that goes into the benchmark document."""
     lines = [
-        "| endpoint | metric | default | morgan | morgan_p2 | morgan_p23 | chosen | why |",
+        "| endpoint | metric | size rule | morgan | morgan_p2 | morgan_p23 | chosen | why |",
         "|---|---|---|---|---|---|---|---|",
     ]
     for entry in decisions:
@@ -223,8 +223,18 @@ def main() -> int:
             ]
             for name in FEATURE_SETS
         }
+        # Compared against the size rule, never against whatever the registry
+        # currently says. Comparing against the registry made the study
+        # path-dependent: once an override was adopted it became the baseline, so a
+        # rerun reported "no change" and could not re-derive the decision from
+        # scratch. The rule is also the only baseline that no label influenced.
         decisions.append(
-            decide(endpoint.key, endpoint.feature_set(endpoint.expected_rows), scores, endpoint.metric)
+            decide(
+                endpoint.key,
+                feature_set_from_size(endpoint.expected_rows),
+                scores,
+                endpoint.metric,
+            )
         )
 
     payload = {
@@ -242,7 +252,7 @@ def main() -> int:
     (args.out / "feature_set_study.md").write_text(markdown(decisions), encoding="utf-8")
 
     changed = [d for d in decisions if d["changed"]]
-    print(f"\n{len(changed)} endpoint(s) would change feature set:")
+    print(f"\n{len(changed)} endpoint(s) take an override over the size rule:")
     for entry in changed:
         print(f"  {entry['endpoint']:<22} {entry['default']} -> {entry['chosen']}  ({entry['reason']})")
     failures = [r for r in records if not r["ok"]]

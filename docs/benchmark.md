@@ -298,17 +298,24 @@ of feature spaces rather than of how much tuner budget each one happened to get,
 ranked on the **pooled out-of-fold** score. Selection never touches the held-out set:
 a feature space chosen against it would turn that number into a selection score. Each
 candidate ran at two seeds, which move the fold assignment, and the spread between them
-is the noise floor a challenger has to clear -- that is what stops the study from
-chasing fold luck. 174 runs, 48 minutes of compute.
+is the noise floor a challenger has to clear. 174 runs, 48 minutes of compute.
 
-The size rule survives at 26 of 29 endpoints. Three measurements disagreed with it by
-more than their own noise, and `endpoints.yaml` now carries those three overrides:
+The baseline is always the size rule, never whatever the registry currently says. That
+matters for rerunning: the first version compared against the registry, so once an
+override was adopted it became its own baseline and a rerun reported "no change"
+instead of re-deriving the decision. The rule is also the only baseline no label
+influenced.
 
-| endpoint | the rule said | measured | the margin |
-|---|---|---|---|
-| `caco2` | `morgan_p2` (906 rows) | `morgan_p23` | 0.3901 against 0.3964 MAE, a 0.0063 gain over a 0.0050 floor |
-| `half_life` | `morgan_p2` (665 rows) | `morgan_p23` | 0.5680 against 0.5466 Spearman, twice its 0.0104 floor |
-| `tox21_nr_ar` | `morgan_p23` (7,265 rows) | `morgan` | 0.5074 against 0.4834 average precision: the pharmacophore blocks **cost** 0.0240 here |
+These numbers are the **second** run of the study. The first was measured on the split
+that grouped scaffolds by input string, and 65 of `tox21_nr_ar`'s 1,451 held-out rows
+had taken part in choosing its override. Rerun on the corrected split, all three
+overrides are confirmed, two of them by a wider margin than before:
+
+| endpoint | the rule said | measured | margin (noise floor) | first run |
+|---|---|---|---|---|
+| `caco2` | `morgan_p2` (906 rows) | `morgan_p23` | 0.0063 (0.0050) | 0.0063 |
+| `half_life` | `morgan_p2` (665 rows) | `morgan_p23` | 0.0338 (0.0115) | 0.0214 |
+| `tox21_nr_ar` | `morgan_p23` (7,265 rows) | `morgan` | 0.0278 (0.0125) | 0.0240 |
 
 `tox21_nr_ar` is the one endpoint where the wider space measurably hurts, and the reason
 is in the data rather than in the fingerprint: at 4.3% positive there are about 310
@@ -319,8 +326,8 @@ Two patterns in the table below are worth keeping in mind before anyone widens t
 feature space again:
 
 - **Most of the value is in the 324-bit 2-point block, not the 87,480-bit 3-point one.**
-  On `solubility` the 2-point block takes MAE from 1.3181 to 1.0316 and the 3-point block
-  adds a further 0.0099. The same shape holds at `lipophilicity`, `ppbr` and every CYP
+  On `solubility` the 2-point block takes MAE from 1.3118 to 1.0259 and the 3-point block
+  adds a further 0.0111. The same shape holds at `lipophilicity`, `ppbr` and every CYP
   panel.
 - **The 3-point block earns its keep on the large panels and the regression endpoints,
   and is noise on the small ones.** Above 7,000 rows it wins or ties everywhere except
@@ -333,37 +340,37 @@ official numbers are the ones to read for that. Bold marks the best measured can
 and the `chosen` column is what the registry uses, which differs wherever the winner did
 not clear the noise floor.
 
-| endpoint | metric | default | morgan | morgan_p2 | morgan_p23 | chosen | why |
+| endpoint | metric | size rule | morgan | morgan_p2 | morgan_p23 | chosen | why |
 |---|---|---|---|---|---|---|---|
 | `caco2` | mae | `morgan_p2` | 0.4376 | 0.3964 | **0.3901** | `morgan_p23` | beats the default by 0.0063, above the 0.0050 noise floor |
-| `pampa` | auroc | `morgan_p23` | 0.6940 | **0.7367** | 0.7218 | `morgan_p23` | ahead by only 0.0149, within the 0.0272 noise floor |
-| `hia` | auroc | `morgan_p2` | 0.8755 | **0.9406** | 0.9281 | `morgan_p2` | the size rule's default is also the best measured |
+| `pampa` | auroc | `morgan_p23` | 0.7048 | **0.7341** | 0.7248 | `morgan_p23` | ahead by only 0.0093, within the 0.0178 noise floor |
+| `hia` | auroc | `morgan_p2` | 0.8752 | **0.9374** | 0.9295 | `morgan_p2` | the size rule's default is also the best measured |
 | `pgp` | auroc | `morgan_p23` | 0.9068 | 0.9259 | **0.9310** | `morgan_p23` | the size rule's default is also the best measured |
-| `bioavailability` | auroc | `morgan_p2` | 0.6688 | 0.6968 | **0.6974** | `morgan_p2` | ahead by only 0.0005, within the 0.0143 noise floor |
+| `bioavailability` | auroc | `morgan_p2` | 0.6623 | 0.7000 | **0.7046** | `morgan_p2` | ahead by only 0.0046, within the 0.0206 noise floor |
 | `lipophilicity` | mae | `morgan_p23` | 0.7826 | 0.6823 | **0.6721** | `morgan_p23` | the size rule's default is also the best measured |
-| `solubility` | mae | `morgan_p23` | 1.3181 | 1.0316 | **1.0217** | `morgan_p23` | the size rule's default is also the best measured |
-| `bbb` | auroc | `morgan_p23` | 0.8903 | **0.9222** | 0.9205 | `morgan_p23` | ahead by only 0.0017, within the 0.0050 noise floor |
+| `solubility` | mae | `morgan_p23` | 1.3118 | 1.0259 | **1.0148** | `morgan_p23` | the size rule's default is also the best measured |
+| `bbb` | auroc | `morgan_p23` | 0.8875 | 0.9187 | **0.9206** | `morgan_p23` | the size rule's default is also the best measured |
 | `ppbr` | mae | `morgan_p23` | 10.4416 | 9.5541 | **9.5510** | `morgan_p23` | the size rule's default is also the best measured |
-| `vdss` | spearman | `morgan_p23` | 0.6500 | **0.6894** | 0.6823 | `morgan_p23` | ahead by only 0.0071, within the 0.0117 noise floor |
-| `cyp2c9_veith` | auprc | `morgan_p23` | 0.7119 | 0.7596 | **0.7629** | `morgan_p23` | the size rule's default is also the best measured |
-| `cyp2d6_veith` | auprc | `morgan_p23` | 0.5831 | 0.6458 | **0.6462** | `morgan_p23` | the size rule's default is also the best measured |
-| `cyp3a4_veith` | auprc | `morgan_p23` | 0.8054 | 0.8344 | **0.8367** | `morgan_p23` | the size rule's default is also the best measured |
-| `cyp1a2_veith` | auprc | `morgan_p23` | 0.8702 | 0.8984 | **0.9009** | `morgan_p23` | the size rule's default is also the best measured |
-| `cyp2c19_veith` | auprc | `morgan_p23` | 0.7917 | **0.8223** | 0.8196 | `morgan_p23` | ahead by only 0.0027, within the 0.0050 noise floor |
+| `vdss` | spearman | `morgan_p23` | 0.6543 | **0.6844** | 0.6812 | `morgan_p23` | ahead by only 0.0032, within the 0.0086 noise floor |
+| `cyp2c9_veith` | auprc | `morgan_p23` | 0.7084 | 0.7590 | **0.7611** | `morgan_p23` | the size rule's default is also the best measured |
+| `cyp2d6_veith` | auprc | `morgan_p23` | 0.5845 | 0.6429 | **0.6470** | `morgan_p23` | the size rule's default is also the best measured |
+| `cyp3a4_veith` | auprc | `morgan_p23` | 0.8047 | 0.8347 | **0.8355** | `morgan_p23` | the size rule's default is also the best measured |
+| `cyp1a2_veith` | auprc | `morgan_p23` | 0.8688 | 0.8986 | **0.9017** | `morgan_p23` | the size rule's default is also the best measured |
+| `cyp2c19_veith` | auprc | `morgan_p23` | 0.7880 | 0.8189 | **0.8198** | `morgan_p23` | the size rule's default is also the best measured |
 | `cyp2c9_substrate` | auprc | `morgan_p2` | 0.3275 | 0.3518 | **0.3770** | `morgan_p2` | ahead by only 0.0252, within the 0.0379 noise floor |
 | `cyp2d6_substrate` | auprc | `morgan_p2` | 0.5361 | **0.5923** | 0.5805 | `morgan_p2` | the size rule's default is also the best measured |
 | `cyp3a4_substrate` | auroc | `morgan_p2` | 0.6703 | **0.6878** | 0.6854 | `morgan_p2` | the size rule's default is also the best measured |
-| `half_life` | spearman | `morgan_p2` | 0.4990 | 0.5466 | **0.5680** | `morgan_p23` | beats the default by 0.0214, above the 0.0104 noise floor |
+| `half_life` | spearman | `morgan_p2` | 0.4548 | 0.5088 | **0.5426** | `morgan_p23` | beats the default by 0.0338, above the 0.0115 noise floor |
 | `clearance_hepatocyte` | spearman | `morgan_p23` | 0.4989 | 0.5135 | **0.5260** | `morgan_p23` | the size rule's default is also the best measured |
 | `clearance_microsome` | spearman | `morgan_p23` | 0.5985 | **0.6079** | 0.5938 | `morgan_p23` | ahead by only 0.0142, within the 0.0250 noise floor |
-| `ld50` | mae | `morgan_p23` | 0.6000 | 0.5816 | **0.5771** | `morgan_p23` | the size rule's default is also the best measured |
-| `herg` | auroc | `morgan_p2` | 0.8291 | **0.8506** | 0.8496 | `morgan_p2` | the size rule's default is also the best measured |
-| `herg_karim` | auroc | `morgan_p23` | 0.7725 | 0.8273 | **0.8332** | `morgan_p23` | the size rule's default is also the best measured |
-| `ames` | auroc | `morgan_p23` | 0.7973 | **0.8063** | 0.8052 | `morgan_p23` | ahead by only 0.0011, within the 0.0063 noise floor |
-| `dili` | auroc | `morgan_p2` | 0.8171 | 0.8313 | **0.8374** | `morgan_p2` | ahead by only 0.0060, within the 0.0126 noise floor |
+| `ld50` | mae | `morgan_p23` | 0.6005 | 0.5831 | **0.5789** | `morgan_p23` | the size rule's default is also the best measured |
+| `herg` | auroc | `morgan_p2` | 0.8046 | **0.8351** | 0.8337 | `morgan_p2` | the size rule's default is also the best measured |
+| `herg_karim` | auroc | `morgan_p23` | 0.7703 | 0.8260 | **0.8322** | `morgan_p23` | the size rule's default is also the best measured |
+| `ames` | auroc | `morgan_p23` | 0.7998 | 0.8051 | **0.8081** | `morgan_p23` | the size rule's default is also the best measured |
+| `dili` | auroc | `morgan_p2` | 0.8160 | 0.8208 | **0.8292** | `morgan_p2` | ahead by only 0.0084, within the 0.0178 noise floor |
 | `carcinogens` | auprc | `morgan_p2` | **0.7297** | 0.7117 | 0.7150 | `morgan_p2` | ahead by only 0.0180, within the 0.0627 noise floor |
 | `skin_reaction` | auroc | `morgan_p2` | 0.6077 | 0.6195 | **0.6238** | `morgan_p2` | ahead by only 0.0043, within the 0.0156 noise floor |
-| `tox21_nr_ar` | auprc | `morgan_p23` | **0.5074** | 0.4999 | 0.4834 | `morgan` | beats the default by 0.0240, above the 0.0137 noise floor |
+| `tox21_nr_ar` | auprc | `morgan_p23` | **0.5179** | 0.5104 | 0.4901 | `morgan` | beats the default by 0.0278, above the 0.0125 noise floor |
 
 ## Column pruning and per-endpoint slicing
 
