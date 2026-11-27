@@ -36,7 +36,7 @@ from admetus.chem.similarity import Reference, nearest_neighbour_similarity
 from admetus.chem.spec import FeaturizerSpec
 from admetus.data import audit, splits
 from admetus.data.loader import Dataset
-from admetus.data.registry import Endpoint, prevalence_range, search_budget
+from admetus.data.registry import Endpoint, prevalence_range
 from admetus.errors import InputDataError
 from admetus.logging import get_logger
 from admetus.train import calibrate, conformal, cv, metrics, objectives, prune, transforms, tuning
@@ -80,6 +80,35 @@ class TrainedModel:
     @property
     def n_boosters(self) -> int:
         return len(self.boosters)
+
+
+#: Regression objective per endpoint, where squared error is not the aligned loss.
+#: The rank-based endpoints get a robust loss, because their metric is Spearman and
+#: the tuner cannot search the objective itself.
+REGRESSION_OBJECTIVE = {
+    "vdss": "regression_l1",
+    "half_life": "regression_l1",
+    "clearance_hepatocyte": "regression_l1",
+    "clearance_microsome": "regression_l1",
+    "ppbr": "regression_l1",
+    "caco2": "regression_l1",
+    "lipophilicity": "regression_l1",
+    "solubility": "regression_l1",
+    "ld50": "regression_l1",
+}
+
+
+def _rounds_from(boosters: list[Any]) -> int:
+    """Pick the production round count from the tuner's per-fold boosters.
+
+    The median of what the folds settled on, with 10% headroom because the
+    refitted models see slightly more data than the early-stopped ones did.
+    """
+    counts = [int(getattr(b, "best_iteration", 0) or b.num_trees()) for b in boosters]
+    counts = [c for c in counts if c > 0]
+    if not counts:
+        return 300
+    return max(10, int(round(float(np.median(counts)) * 1.1)))
 
 
 def _predict_ensemble(boosters: list[Any], matrix: sparse.csr_matrix) -> tuple[np.ndarray, np.ndarray]:
@@ -154,10 +183,10 @@ def _domain_threshold(
 def train_endpoint(
     endpoint: Endpoint,
     dataset: Dataset,
-    trials: int | None = None,
     folds: int = 5,
-    cv_repeats: int | None = None,
     seed: int = 0,
+    tune: bool = True,
+    time_budget: int | None = tuning.DEFAULT_TIME_BUDGET_SECONDS,
     num_threads: int = 0,
     test_fraction: float = 0.2,
     bootstrap_resamples: int = 2000,
@@ -169,10 +198,11 @@ def train_endpoint(
     Args:
         endpoint: Which endpoint to train.
         dataset: Its normalized data.
-        trials: Search trials. Defaults to a size-dependent budget.
         folds: Requested cross-validation folds.
-        cv_repeats: Repeated fold assignments. Defaults to a size-dependent budget.
-        seed: Seed for splits, the sampler and the watchlist.
+        seed: Seed for splits and the sampler.
+        tune: Run the automatic tuner. Off uses fixed parameters, for tests.
+        time_budget: Wall-clock cap for tuning, in seconds. The tuner's trial
+            count is effectively fixed, so this is the only way to bound it.
         num_threads: LightGBM threads. ``0`` lets LightGBM decide.
         test_fraction: Share held out.
         bootstrap_resamples: Resamples for the reported confidence interval.
@@ -243,66 +273,58 @@ def train_endpoint(
         [smiles_ok[i] for i in train_rows], y_train, endpoint.task, n_splits=folds, seed=seed
     )
 
-    budget = search_budget(train_rows.size, trials=trials, cv_repeats=cv_repeats)
-    base_params = cv.base_params(endpoint.task, endpoint.metric, num_threads=num_threads, seed=seed)
-
+    # --- parameters we set by rule, which the tuner then builds on ---------
     n_pos = int(np.count_nonzero(y_train == 1)) if endpoint.is_classification else 0
-    weight_range = (
-        tuning.class_weight_range(n_pos / y_train.size, n_pos, y_train.size - n_pos)
+    n_neg = int(y_train.size - n_pos)
+    weight = (
+        tuning.class_weight(n_pos / y_train.size, n_pos, n_neg)
         if endpoint.is_classification
-        else None
+        else 1.0
     )
-    smallest_fold_train = min(f.train.size for f in fold_sets)
-    tune_rounds = smallest_fold_train < cv.MIN_ROWS_FOR_EARLY_STOPPING
-
-    repeat_seeds = [seed + i for i in range(budget.cv_repeats)]
-    fold_sets_by_repeat = [fold_sets] + [
-        splits.cv_folds(
-            [smiles_ok[i] for i in train_rows], y_train, endpoint.task, n_splits=folds, seed=s
+    objective = REGRESSION_OBJECTIVE.get(endpoint.key) if not endpoint.is_classification else None
+    params = tuning.fixed_params(
+        endpoint.task, endpoint.metric, scale_pos_weight=weight,
+        objective=objective, num_threads=num_threads, seed=seed,
+    )
+    if weight != 1.0:
+        log.info(
+            "%s: %.1f%% positive, so scale_pos_weight=%.2f", endpoint.key,
+            100 * n_pos / y_train.size, weight,
         )
-        for s in repeat_seeds[1:]
-    ]
 
-    def evaluate(params: dict[str, Any]) -> float:
-        merged, rounds = tuning.merge(base_params, params)
-        scores: list[float] = []
-        for repeat_folds in fold_sets_by_repeat:
-            fits = [
-                cv.fit_fold(x_train, y_train, f, merged, num_boost_round=rounds, seed=seed)
-                for f in repeat_folds
-            ]
-            pooled = objectives.pool(fits, x_train.shape[0], endpoint.task, endpoint.metric, y_train)
-            scores.append(objectives.score(pooled, y_train, endpoint.metric))
-        return objectives.as_objective(float(np.mean(scores)), endpoint.metric)
+    # --- automatic tuning --------------------------------------------------
+    tune_record: dict[str, Any]
+    if tune:
+        log.info(
+            "%s: tuning over %d fold(s), %d train rows, %d columns (budget %ss)",
+            endpoint.key, len(fold_sets), train_rows.size, basis.n_cols, time_budget,
+        )
+        tuned = tuning.auto_tune(
+            x_train, y_train, fold_sets, params, seed=seed, time_budget=time_budget,
+            storage=tuning.study_path(models_dir, endpoint.key) if models_dir else None,
+            study_name=f"admetus-{endpoint.key}",
+        )
+        merged = tuned.params
+        tune_record = tuned.to_dict()
+        # The tuner's own boosters are used only to pick the round count. They were
+        # early-stopped on the folds they were scored against, so they are not what
+        # ships; the production ensemble is refitted below at a fixed count.
+        rounds = _rounds_from(tuned.boosters)
+    else:
+        merged = tuning.default_params(
+            endpoint.task, endpoint.metric, train_rows.size, num_threads=num_threads, seed=seed
+        )
+        merged.update({k: v for k, v in params.items() if k not in merged})
+        tune_record = {"tuner": None, "best_params": merged, "cv_score_biased": True}
+        rounds = 300
 
-    log.info(
-        "%s: searching %d trial(s) over %d fold(s) x %d repeat(s), %d train rows, %d columns",
-        endpoint.key, budget.trials, len(fold_sets), budget.cv_repeats, train_rows.size, basis.n_cols,
-    )
-    storage = tuning.study_path(models_dir, endpoint.key) if models_dir else None
-    search = tuning.search(
-        evaluate,
-        n_trials=budget.trials,
-        n_train=train_rows.size,
-        tune_rounds=tune_rounds,
-        weight_range=weight_range,
-        tune_objective=endpoint.metric == "spearman",
-        seed=seed,
-        storage=storage,
-        study_name=f"admetus-{endpoint.key}",
-    )
-
-    # --- refit the ensemble at a fixed round count -------------------------
-    merged, searched_rounds = tuning.merge(base_params, search.params)
-    probe = [
-        cv.fit_fold(x_train, y_train, f, merged, num_boost_round=searched_rounds, seed=seed)
+    # --- refit the production ensemble at a fixed round count ---------------
+    final = [
+        cv.fit_fold(x_train, y_train, f, merged, num_boost_round=rounds, seed=seed)
         for f in fold_sets
     ]
-    rounds = searched_rounds if searched_rounds is not None else cv.deployment_rounds(probe)
-    final = [
-        cv.fit_fold(x_train, y_train, f, merged, num_boost_round=rounds, seed=seed) for f in fold_sets
-    ]
     boosters = [f.booster for f in final]
+    log.info("%s: refitted %d booster(s) at %d rounds", endpoint.key, len(boosters), rounds)
 
     pooled = objectives.pool(final, x_train.shape[0], endpoint.task, endpoint.metric, y_train)
     oof = pooled.prediction
@@ -375,12 +397,12 @@ def train_endpoint(
             endpoint.key, 100 * achieved, 100 * interval.level,
         )
 
-    cv_record = search.to_dict()
+    cv_record = dict(tune_record)
     cv_record["fold_diagnostics"] = objectives.fold_diagnostics(pooled)
     cv_record["fold_report"] = splits.fold_report(fold_sets, y_train, endpoint.task)
     cv_record["deployment_rounds"] = rounds
-    cv_record["tuned_boost_rounds"] = tune_rounds
-    cv_record["cv_repeats"] = budget.cv_repeats
+    cv_record["n_folds"] = len(fold_sets)
+    cv_record["n_columns_into_tuner"] = basis.n_cols
 
     provenance = {
         "n_dataset_rows": len(dataset),

@@ -7,6 +7,23 @@ keeping the dependency out means the inference install stays small.
 Downloads are atomic: a file is written to ``<name>.part`` and renamed only once
 it is complete and its digest recorded. A half-written dataset is never mistaken
 for a whole one.
+
+**Digests are pinned in the registry, not learned from the last run.** An earlier
+version warned when a file's digest changed and then recorded the new value, which
+got it backwards: the warning scrolled past on stderr while the adoption was
+permanent, so from the next run onward the changed file was the baseline and
+nothing was reported at all.
+
+That matters less as an attack surface -- the source is served over HTTPS -- than
+as a reproducibility problem. A bundle records which bytes it was trained on, and
+a silent upstream revision would move the recorded digest, leave the models
+untouched, and make that record false without anything failing.
+
+So ``endpoints.yaml`` carries the digest, a mismatch is refused, and re-pinning is
+something a person does deliberately. To be clear about what this is and is not:
+the source publishes no checksums, so the pinned values are simply the ones we
+observed first. This remains trust on first use. What changes is that the trust
+decision is frozen at a known point and tracked in version control.
 """
 
 from __future__ import annotations
@@ -127,25 +144,82 @@ def fetch(url: str, destination: Path, timeout: float = DEFAULT_TIMEOUT, overwri
     return Download(destination, digest.hexdigest(), n_bytes, from_cache=False)
 
 
-def fetch_dataset(key: str, url: str, directory: Path, overwrite: bool = False) -> Download:
-    """Download one dataset and record its digest alongside the others."""
+def fetch_dataset(
+    key: str,
+    url: str,
+    directory: Path,
+    overwrite: bool = False,
+    expected_sha256: str | None = None,
+    accept_upstream_change: bool = False,
+) -> Download:
+    """Download one dataset and check it against the digest pinned in the registry.
+
+    Args:
+        key: Endpoint key, which names the file.
+        url: Where to fetch it.
+        directory: Where to put it.
+        overwrite: Fetch again even when the file is present.
+        expected_sha256: The pinned digest. ``None`` skips the check, which is only
+            right for a dataset that has no pin yet.
+        accept_upstream_change: Proceed despite a mismatch. Deliberate, and it says
+            loudly that models trained on the old bytes are now stale.
+
+    Returns:
+        A :class:`Download` describing the file on disk.
+
+    Raises:
+        NetworkError: The download failed, or its digest disagrees with the pin.
+            Refusing is the point: adopting a changed file silently is what the
+            pin exists to prevent. The cached file is checked the same way, so a
+            file that changed on disk is caught too.
+    """
     directory = Path(directory)
     result = fetch(url, directory / f"{key}.tab", overwrite=overwrite)
 
-    checksums = read_checksums(directory)
-    previous = checksums.get(key)
-    if previous and previous.get("sha256") != result.sha256:
-        log.warning(
-            "%s changed upstream: recorded %s, now %s. The published dataset was revised.",
-            key, str(previous.get("sha256"))[:16], result.sha256[:16],
+    if expected_sha256 and result.sha256 != expected_sha256:
+        message = (
+            f"{key}: the dataset does not match the digest pinned in the registry.\n"
+            f"  pinned:  {expected_sha256}\n"
+            f"  fetched: {result.sha256}\n"
+            f"  source:  {url}\n"
+            f"  file:    {result.path}"
         )
-    checksums[key] = {"sha256": result.sha256, "bytes": result.n_bytes, "url": url}
+        if not accept_upstream_change:
+            # Leave nothing half-adopted: the file goes, the pin stays.
+            result.path.unlink(missing_ok=True)
+            raise NetworkError(
+                message
+                + "\n\nThe published dataset was most likely revised. Models trained on the "
+                "pinned bytes would no longer match this file, so the fetch is refused. "
+                "To take the new version deliberately, pass --accept-upstream-change, then "
+                "update the sha256 in endpoints.yaml and retrain the affected endpoints."
+            )
+        log.warning(
+            "%s\n\nAccepted because --accept-upstream-change was given. Any model trained on "
+            "the pinned bytes is now STALE and must be retrained.", message,
+        )
+
+    # An observed-state record, not the source of truth. The registry is that.
+    checksums = read_checksums(directory)
+    checksums[key] = {
+        "sha256": result.sha256,
+        "bytes": result.n_bytes,
+        "url": url,
+        "matches_pin": (expected_sha256 is None) or (result.sha256 == expected_sha256),
+        "pinned": expected_sha256,
+    }
     write_checksums(directory, checksums)
     return result
 
 
-def verify_dataset(key: str, directory: Path) -> tuple[bool, str]:
-    """Check one dataset against its recorded digest.
+def verify_dataset(key: str, directory: Path, expected_sha256: str | None = None) -> tuple[bool, str]:
+    """Check one dataset on disk against the digest pinned in the registry.
+
+    Args:
+        key: Endpoint key.
+        directory: Where the datasets live.
+        expected_sha256: The pinned digest. Falls back to the observed record only
+            when the endpoint has no pin.
 
     Returns:
         ``(ok, detail)``.
@@ -154,13 +228,19 @@ def verify_dataset(key: str, directory: Path) -> tuple[bool, str]:
     path = directory / f"{key}.tab"
     if not path.is_file():
         return False, "file is missing"
+
+    actual = sha256_file(path)
+    if expected_sha256:
+        if actual == expected_sha256:
+            return True, "matches the pinned digest"
+        return False, f"does not match the pin: expected {expected_sha256[:16]}, found {actual[:16]}"
+
     recorded = read_checksums(directory).get(key)
     if not recorded:
-        return False, "no digest was recorded"
-    actual = sha256_file(path)
+        return False, "no digest is pinned and none was recorded"
     if actual != recorded.get("sha256"):
-        return False, f"digest mismatch: recorded {str(recorded.get('sha256'))[:16]}, found {actual[:16]}"
-    return True, "ok"
+        return False, f"changed since it was fetched: recorded {str(recorded.get('sha256'))[:16]}, found {actual[:16]}"
+    return True, "unpinned, but unchanged since it was fetched"
 
 
 def extract_benchmark_archive(archive: Path, destination: Path) -> list[str]:

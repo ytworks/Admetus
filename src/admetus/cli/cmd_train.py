@@ -25,6 +25,7 @@ from admetus.data import loader
 from admetus.data.registry import resolve_keys
 from admetus.errors import AdmetusError
 from admetus.logging import get_logger
+from admetus.train import tuning
 from admetus.train.trainer import train_endpoint
 
 log = get_logger("cli.train")
@@ -35,9 +36,16 @@ log = get_logger("cli.train")
 @all_option
 @data_dir_option
 @models_dir_option
-@click.option("--trials", type=int, default=None, help="Search trials. Default follows dataset size.")
 @click.option("--folds", type=int, default=5, show_default=True, help="Cross-validation folds.")
-@click.option("--repeats", type=int, default=None, help="Repeated fold assignments. Default follows size.")
+@click.option(
+    "--time-budget", type=int, default=None,
+    help="Wall-clock cap for tuning one endpoint, in seconds. The tuner's trial count is "
+         "effectively fixed, so this is how a long run is bounded.",
+)
+@click.option(
+    "--tune/--no-tune", default=True, show_default=True,
+    help="Run the automatic LightGBM tuner. --no-tune uses fixed parameters.",
+)
 @click.option(
     "--feature-set", type=click.Choice(["morgan", "morgan_p2", "morgan_p23"]), default=None,
     help="Override the feature space. Default follows dataset size.",
@@ -54,9 +62,9 @@ def train_command(
     select_all: bool,
     data_dir: Path | None,
     models_dir: Path | None,
-    trials: int | None,
     folds: int,
-    repeats: int | None,
+    time_budget: int | None,
+    tune: bool,
     feature_set: str | None,
     seed: int,
     jobs: int,
@@ -66,9 +74,13 @@ def train_command(
 ) -> None:
     """Train one or more endpoints and write their bundles.
 
+    Hyperparameters are chosen by Optuna's stepwise LightGBM tuner, over the same
+    scaffold-grouped folds the model is cross-validated on. Its trial count is
+    effectively fixed at 65 to 68, so --time-budget is how a long run is bounded.
+
     Endpoints that already have a valid bundle are skipped unless --force is
-    given, so a long run can be resumed. The hyperparameter study is kept in
-    SQLite beside the bundle and resumes too.
+    given, so a long run can be resumed. The tuning study is kept in SQLite
+    beside the bundle and resumes too.
     """
     setup_logging(ctx)
 
@@ -92,8 +104,9 @@ def train_command(
             try:
                 dataset = loader.load(endpoint, data)
                 model = train_endpoint(
-                    endpoint, dataset,
-                    trials=trials, folds=folds, cv_repeats=repeats, seed=seed,
+                    endpoint, dataset, folds=folds, seed=seed, tune=tune,
+                    time_budget=time_budget if time_budget is not None
+                    else tuning.DEFAULT_TIME_BUDGET_SECONDS,
                     num_threads=jobs, bootstrap_resamples=bootstrap,
                     models_dir=models, feature_set=feature_set,
                 )

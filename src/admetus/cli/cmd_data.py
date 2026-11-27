@@ -33,6 +33,11 @@ def data_group() -> None:
 @data_dir_option
 @click.option("--overwrite", is_flag=True, help="Fetch again even when the file is present.")
 @click.option("--verify", "verify_only", is_flag=True, help="Only check what is already there.")
+@click.option(
+    "--accept-upstream-change", is_flag=True,
+    help="Accept a dataset whose digest no longer matches the registry. Deliberate: any "
+         "model trained on the pinned bytes becomes stale and must be retrained.",
+)
 @json_option
 @click.pass_context
 def fetch_command(
@@ -41,14 +46,18 @@ def fetch_command(
     select_all: bool,
     data_dir: Path | None,
     overwrite: bool,
+    accept_upstream_change: bool,
     verify_only: bool,
     as_json: bool,
 ) -> None:
     """Download datasets from Harvard Dataverse into a local directory.
 
     The files are published one per dataset, so this needs nothing beyond HTTP.
-    A digest is recorded on first fetch and checked by --verify, which is how a
-    revision upstream becomes visible rather than silent.
+
+    Each dataset's digest is pinned in the registry, and a file that does not match
+    is refused rather than adopted, so an upstream revision cannot silently become
+    the new baseline and make a model's recorded provenance false. Taking a new
+    version is deliberate: --accept-upstream-change.
     """
     setup_logging(ctx)
 
@@ -62,7 +71,7 @@ def fetch_command(
         failures = 0
         for endpoint in selected:
             if verify_only:
-                ok, detail = verify_dataset(endpoint.key, directory)
+                ok, detail = verify_dataset(endpoint.key, directory, endpoint.sha256)
                 results.append({"endpoint": endpoint.key, "ok": ok, "detail": detail})
                 failures += 0 if ok else 1
                 if not as_json:
@@ -70,7 +79,9 @@ def fetch_command(
                 continue
             try:
                 download = fetch_dataset(
-                    endpoint.key, endpoint.download_url, directory, overwrite=overwrite
+                    endpoint.key, endpoint.download_url, directory, overwrite=overwrite,
+                    expected_sha256=endpoint.sha256,
+                    accept_upstream_change=accept_upstream_change,
                 )
             except NetworkError as exc:
                 failures += 1
@@ -85,6 +96,7 @@ def fetch_command(
                 "path": str(download.path),
                 "bytes": download.n_bytes,
                 "sha256": download.sha256,
+                "pinned_sha256": endpoint.sha256,
                 "from_cache": download.from_cache,
             })
             if not as_json:

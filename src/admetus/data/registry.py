@@ -89,6 +89,7 @@ class Endpoint:
     in_official_group: bool
     description: str
     expected_rows: int | None = None
+    sha256: str | None = None
     label_name: str | None = None
     transform: str | None = None
     output_range: tuple[float | None, float | None] | None = None
@@ -196,9 +197,10 @@ def search_budget(n_train: int, trials: int | None = None, cv_repeats: int | Non
 def _coerce(raw: dict[str, Any], defaults: dict[str, Any]) -> Endpoint:
     """Build an :class:`Endpoint` from one YAML mapping."""
     known = {
-        "key", "tdc_name", "dataverse_id", "task", "metric", "unit", "in_official_group",
-        "description", "expected_rows", "label_name", "transform", "output_range",
-        "species_filter", "standardize", "correlated_with", "notes", "feature_set",
+        "key", "tdc_name", "dataverse_id", "sha256", "task", "metric", "unit",
+        "in_official_group", "description", "expected_rows", "label_name", "transform",
+        "output_range", "species_filter", "standardize", "correlated_with", "notes",
+        "feature_set",
     }
     unknown = set(raw) - known
     if unknown:
@@ -223,6 +225,7 @@ def _coerce(raw: dict[str, Any], defaults: dict[str, Any]) -> Endpoint:
         in_official_group=bool(raw["in_official_group"]),
         description=raw["description"],
         expected_rows=raw.get("expected_rows"),
+        sha256=raw.get("sha256"),
         label_name=raw.get("label_name"),
         transform=raw.get("transform"),
         output_range=tuple(output_range) if output_range else None,
