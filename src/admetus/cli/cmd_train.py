@@ -1,0 +1,214 @@
+"""``admetus train`` and ``admetus evaluate``."""
+
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+import click
+
+from admetus.bundle import save as bundle_save
+from admetus.bundle.load import read_metadata, verify
+from admetus.cli.options import (
+    all_option,
+    data_dir_option,
+    default_data_dir,
+    default_models_dir,
+    emit,
+    endpoint_option,
+    json_option,
+    models_dir_option,
+    run_guarded,
+    setup_logging,
+)
+from admetus.data import loader
+from admetus.data.registry import resolve_keys
+from admetus.errors import AdmetusError
+from admetus.logging import get_logger
+from admetus.train.trainer import train_endpoint
+
+log = get_logger("cli.train")
+
+
+@click.command("train")
+@endpoint_option
+@all_option
+@data_dir_option
+@models_dir_option
+@click.option("--trials", type=int, default=None, help="Search trials. Default follows dataset size.")
+@click.option("--folds", type=int, default=5, show_default=True, help="Cross-validation folds.")
+@click.option("--repeats", type=int, default=None, help="Repeated fold assignments. Default follows size.")
+@click.option(
+    "--feature-set", type=click.Choice(["morgan", "morgan_p2", "morgan_p23"]), default=None,
+    help="Override the feature space. Default follows dataset size.",
+)
+@click.option("--seed", type=int, default=0, show_default=True, help="Seed for splits and the sampler.")
+@click.option("--jobs", type=int, default=0, help="LightGBM threads. 0 lets LightGBM decide.")
+@click.option("--bootstrap", type=int, default=2000, show_default=True, help="Resamples for the interval.")
+@click.option("--force", is_flag=True, help="Retrain endpoints that already have a valid bundle.")
+@json_option
+@click.pass_context
+def train_command(
+    ctx: click.Context,
+    endpoints: tuple[str, ...],
+    select_all: bool,
+    data_dir: Path | None,
+    models_dir: Path | None,
+    trials: int | None,
+    folds: int,
+    repeats: int | None,
+    feature_set: str | None,
+    seed: int,
+    jobs: int,
+    bootstrap: int,
+    force: bool,
+    as_json: bool,
+) -> None:
+    """Train one or more endpoints and write their bundles.
+
+    Endpoints that already have a valid bundle are skipped unless --force is
+    given, so a long run can be resumed. The hyperparameter study is kept in
+    SQLite beside the bundle and resumes too.
+    """
+    setup_logging(ctx)
+
+    def body() -> None:
+        selected = resolve_keys(endpoints, select_all)
+        data = Path(data_dir or default_data_dir())
+        models = Path(models_dir or default_models_dir())
+        started = time.time()
+
+        results = []
+        skipped = []
+        failed = []
+        for endpoint in selected:
+            target = models / endpoint.key
+            if not force and target.is_dir():
+                ok, _ = verify(target, check_fingerprint=False)
+                if ok:
+                    skipped.append(endpoint.key)
+                    log.info("%s: a valid bundle exists; use --force to retrain", endpoint.key)
+                    continue
+            try:
+                dataset = loader.load(endpoint, data)
+                model = train_endpoint(
+                    endpoint, dataset,
+                    trials=trials, folds=folds, cv_repeats=repeats, seed=seed,
+                    num_threads=jobs, bootstrap_resamples=bootstrap,
+                    models_dir=models, feature_set=feature_set,
+                )
+                path = bundle_save.save(model, models)
+                results.append({
+                    "endpoint": endpoint.key,
+                    "path": str(path),
+                    "metric": endpoint.metric,
+                    "primary": model.test_metrics["primary"],
+                    "n_features": model.basis.n_cols,
+                    "feature_set": model.spec.feature_set,
+                    "seconds": model.provenance["train_seconds"],
+                })
+            except AdmetusError as exc:
+                failed.append({"endpoint": endpoint.key, "error": str(exc)})
+                log.error("%s: %s", endpoint.key, exc)
+
+        payload = {
+            "ok": not failed,
+            "models_dir": str(models),
+            "n_trained": len(results),
+            "n_skipped": len(skipped),
+            "n_failed": len(failed),
+            "skipped": skipped,
+            "trained": results,
+            "failed": failed,
+            "seconds": round(time.time() - started, 1),
+        }
+        if as_json:
+            emit(payload)
+        else:
+            for entry in results:
+                primary = entry["primary"]
+                click.echo(
+                    f"{entry['endpoint']:<22} {entry['metric']:<9} "
+                    f"{primary['value']:.4f} [{primary['ci_low']:.4f}, {primary['ci_high']:.4f}]  "
+                    f"n={primary['n']}  {entry['seconds']:.0f}s"
+                )
+            if skipped:
+                click.echo(f"\nskipped {len(skipped)} endpoint(s) that already have a bundle")
+            if failed:
+                for entry in failed:
+                    click.echo(f"FAILED {entry['endpoint']}: {entry['error']}", err=True)
+        if failed:
+            raise SystemExit(2)
+
+    run_guarded(body, as_json=as_json)
+
+
+@click.command("evaluate")
+@endpoint_option
+@all_option
+@models_dir_option
+@json_option
+@click.pass_context
+def evaluate_command(
+    ctx: click.Context, endpoints: tuple[str, ...], select_all: bool,
+    models_dir: Path | None, as_json: bool,
+) -> None:
+    """Report the held-out metrics recorded when each model was trained.
+
+    These are read from the bundles rather than recomputed: the held-out set is
+    looked at exactly once, at training time, and the number is stored with its
+    bootstrap interval. The cross-validation score is also stored, flagged as
+    biased, and is not reported as performance.
+    """
+    setup_logging(ctx)
+
+    def body() -> None:
+        directory = Path(models_dir or default_models_dir())
+        selected = resolve_keys(endpoints, select_all)
+        rows = []
+        for endpoint in selected:
+            path = directory / endpoint.key
+            if not path.is_dir():
+                continue
+            meta = read_metadata(path)
+            metrics = meta.get("metrics") or {}
+            rows.append({
+                "endpoint": endpoint.key,
+                "metric": endpoint.metric,
+                "in_official_group": endpoint.in_official_group,
+                "primary": metrics.get("primary"),
+                "all_metrics": {k: v for k, v in metrics.items() if k != "primary"},
+                "cv_score_biased": (meta.get("cross_validation") or {}).get("cv_score_biased", True),
+                "interval_coverage": metrics.get("interval_coverage"),
+                "low_confidence": metrics.get("low_confidence"),
+            })
+
+        if as_json:
+            emit({"ok": True, "models_dir": str(directory), "n_models": len(rows), "results": rows})
+            return
+        if not rows:
+            click.echo(f"no trained models in {directory}")
+            raise SystemExit(3)
+        click.echo(f"{'endpoint':<22} {'metric':<9} {'held-out (95% CI)':<26} {'n':>5}  notes")
+        for row in rows:
+            primary = row["primary"] or {}
+            score = (
+                f"{primary.get('value', float('nan')):.4f} "
+                f"[{primary.get('ci_low', float('nan')):.4f}, {primary.get('ci_high', float('nan')):.4f}]"
+            )
+            notes = []
+            if row["low_confidence"]:
+                notes.append("small dataset")
+            if row["interval_coverage"] is not None:
+                notes.append(f"interval covers {row['interval_coverage']:.0%}")
+            if not row["in_official_group"]:
+                notes.append("not in the official group")
+            click.echo(
+                f"{row['endpoint']:<22} {row['metric']:<9} {score:<26} "
+                f"{primary.get('n', 0):>5}  {', '.join(notes)}"
+            )
+
+    run_guarded(body, as_json=as_json)
+
+
+__all__ = ["evaluate_command", "train_command"]
