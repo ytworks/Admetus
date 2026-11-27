@@ -224,10 +224,16 @@ def test_a_repeated_molecule_is_featurized_once_and_predicted_the_same(trained, 
     assert report.n_featurized == 3
 
 
-def test_salts_are_standardized_and_counted(trained, tmp_path):
+def test_a_salt_is_featurized_as_published(trained, tmp_path):
+    """Standardization was an addition, and it changed which molecule was seen.
+
+    The fixture holds a sodium acetate row. It used to be reduced to its free base
+    before fingerprinting; now it is fingerprinted as written, which is what the
+    reference implementation does.
+    """
     _, _, path = trained
     _, _, report = _predict(path, tmp_path)
-    assert report.n_standardization_changed >= 1
+    assert report.n_standardization_changed == 0
 
 
 def test_classification_output_is_a_probability(trained, tmp_path):

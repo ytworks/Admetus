@@ -42,10 +42,6 @@ EARLY_STOPPING_ROUNDS = 100
 #: Upper bound on boosting rounds when early stopping is active.
 MAX_BOOST_ROUNDS = 3_000
 
-#: Fixed learning rate. Searching it alongside the round count wastes budget on a
-#: known-redundant axis, so the budget goes to regularization instead.
-LEARNING_RATE = 0.03
-
 
 @dataclass(frozen=True)
 class FoldFit:
@@ -67,36 +63,53 @@ class FoldFit:
 
 
 def base_params(task: str, metric: str, num_threads: int = 0, seed: int = 0) -> dict[str, object]:
-    """Parameters shared by every fit.
+    """Parameters shared by every fit: the reference implementation's, plus knobs.
 
-    The tuning metric is aligned with the metric the endpoint is judged on. A
-    0/1 error rate at a fixed 0.5 threshold, which is the usual default, measures
-    something nobody reports.
+    The reference sets four things and nothing else::
+
+        {'boosting_type': 'gbdt', 'objective': 'binary',
+         'metric': 'binary_error', 'verbosity': -1}
+
+    and for regression ``objective: regression`` with ``metric: rmse``. Those are
+    what this returns. ``metric`` is not the metric the endpoint is judged on: a 0/1
+    error rate at a fixed 0.5 threshold is what the reference tunes against, and
+    aligning it with AUROC or average precision was an unrequested change.
+
+    ``metric`` is also what the tuner optimizes, so this choice decides the search.
+    The endpoint's own metric still decides what is *reported*, from the held-out
+    20%, and the pooled out-of-fold score recorded in each bundle is computed with
+    it too.
+
+    Everything else here is a knob that does not change the model:
+
+    * ``num_threads`` and ``seed`` make a run reproducible, which the command line
+      promises; the reference leaves both to LightGBM.
+    * ``max_bin`` of 2 is exact for this feature space rather than an
+      approximation: every column is a 0/1 bit, so two bins hold it without loss,
+      and the default 255 would only cost memory.
+    * ``deterministic`` and ``force_row_wise`` buy bitwise reproducibility across
+      thread counts.
+
+    What is *not* here any more, each an unrequested addition: a learning rate, a
+    bagging default, ``regression_l1`` for the endpoints judged on MAE, and
+    ``feature_pre_filter``, which the tuner sets for itself.
     """
     params: dict[str, object] = {
         "boosting_type": "gbdt",
-        "learning_rate": LEARNING_RATE,
         "verbosity": -1,
         "num_threads": num_threads,
         "seed": seed,
-        "bagging_fraction": 0.8,
-        "bagging_freq": 1,
-        # Every column is binary, so two bins is all the histogram needs.
         "max_bin": 2,
-        # Bitwise reproducibility across thread counts, which the CLI promises.
         "deterministic": True,
         "force_row_wise": True,
-        # Leave LightGBM's own rare-feature guard on: it drops columns that cannot
-        # satisfy min_data_in_leaf. Turning it off to reuse a Dataset across trials
-        # would discard exactly the protection this feature space needs.
-        "feature_pre_filter": True,
     }
+    _ = metric
     if task == "classification":
         params["objective"] = "binary"
-        params["metric"] = "average_precision" if metric == "auprc" else "auc"
+        params["metric"] = "binary_error"
     else:
-        params["objective"] = "regression_l1" if metric == "mae" else "regression"
-        params["metric"] = "l1" if metric == "mae" else "l2"
+        params["objective"] = "regression"
+        params["metric"] = "rmse"
     return params
 
 
@@ -209,7 +222,6 @@ def deployment_rounds(fits: list[FoldFit]) -> int:
 
 __all__ = [
     "EARLY_STOPPING_ROUNDS",
-    "LEARNING_RATE",
     "MAX_BOOST_ROUNDS",
     "MIN_ROWS_FOR_EARLY_STOPPING",
     "WATCHLIST_FRACTION",

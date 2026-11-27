@@ -37,10 +37,10 @@ from admetus.chem.featurizer import featurize_many
 from admetus.chem.spec import FeaturizerSpec
 from admetus.data import splits
 from admetus.data.loader import Dataset
-from admetus.data.registry import Endpoint, prevalence_range
+from admetus.data.registry import Endpoint
 from admetus.errors import InputDataError
 from admetus.logging import get_logger
-from admetus.train import calibrate, cv, metrics, objectives, prune, transforms, tuning
+from admetus.train import cv, metrics, objectives, prune, transforms, tuning
 
 log = get_logger("train")
 
@@ -55,8 +55,6 @@ class TrainedModel:
     rounds: int
     params: dict[str, Any]
     transform: transforms.Transform
-    calibrator: calibrate.Calibrator | None
-    best_threshold: float | None
     test_metrics: dict[str, Any]
     cv_record: dict[str, Any]
     provenance: dict[str, Any] = field(default_factory=dict)
@@ -64,22 +62,6 @@ class TrainedModel:
     @property
     def n_boosters(self) -> int:
         return len(self.boosters)
-
-
-#: Regression objective per endpoint, where squared error is not the aligned loss.
-#: The rank-based endpoints get a robust loss, because their metric is Spearman and
-#: the tuner cannot search the objective itself.
-REGRESSION_OBJECTIVE = {
-    "vdss": "regression_l1",
-    "half_life": "regression_l1",
-    "clearance_hepatocyte": "regression_l1",
-    "clearance_microsome": "regression_l1",
-    "ppbr": "regression_l1",
-    "caco2": "regression_l1",
-    "lipophilicity": "regression_l1",
-    "solubility": "regression_l1",
-    "ld50": "regression_l1",
-}
 
 
 def _predict_ensemble(boosters: list[Any], matrix: sparse.csr_matrix) -> tuple[np.ndarray, np.ndarray]:
@@ -174,74 +156,93 @@ def train_endpoint(
             f"{endpoint.key}: only {train_rows.size} training rows, which is too few to train on"
         )
 
-    # --- transform and basis, fitted on training rows only ----------------
-    transform = transforms.fit(endpoint.transform, y_published[train_rows])
-    y_fitted = transform.forward(y_published)
-
-    x_train_raw = matrix[train_rows]
-    basis = prune.fit_basis(x_train_raw, prevalence_range(train_rows.size))
-    x_train = prune.apply_basis(x_train_raw, basis)
-    y_train = y_fitted[train_rows]
+    # Labels as published, and every column. The log10 transform, the output clamp
+    # and the prevalence pruning were all additions: the reference trains on the
+    # label it was given and hands LightGBM the whole 89,852-column vector.
+    transform = transforms.fit(None, y_published[train_rows])
+    basis = prune.identity_basis(matrix.shape[1])
+    x_train = matrix[train_rows]
+    y_train = y_published[train_rows]
 
     # --- folds, over the training portion only -----------------------------
     fold_sets = splits.cv_folds(train_rows.size, n_splits=folds)
 
-    # --- parameters we set by rule, which the tuner then builds on ---------
-    n_pos = int(np.count_nonzero(y_train == 1)) if endpoint.is_classification else 0
-    n_neg = int(y_train.size - n_pos)
-    weight = (
-        tuning.class_weight(n_pos / y_train.size, n_pos, n_neg)
-        if endpoint.is_classification
-        else 1.0
-    )
-    objective = REGRESSION_OBJECTIVE.get(endpoint.key) if not endpoint.is_classification else None
+    # --- the reference implementation's parameters; the tuner builds on them ---
     params = tuning.fixed_params(
-        endpoint.task, endpoint.metric, scale_pos_weight=weight,
-        objective=objective, num_threads=num_threads, seed=seed,
+        endpoint.task, endpoint.metric, num_threads=num_threads, seed=seed
     )
-    if weight != 1.0:
-        log.info(
-            "%s: %.1f%% positive, so scale_pos_weight=%.2f", endpoint.key,
-            100 * n_pos / y_train.size, weight,
-        )
 
-    # --- automatic tuning --------------------------------------------------
+    # --- one tuned model per fold, as the reference implementation does -------
+    # Each fold is tuned on its own, with its own validation rows as the watchlist,
+    # and the booster the tuner settles on is the ensemble member. So the folds end
+    # up with different parameters, and the trial count is per fold -- 68 each,
+    # 204 for three, which is what the reference's notebooks show.
     tune_record: dict[str, Any]
+    final: list[cv.FoldFit] = []
+    per_fold: list[dict[str, Any]] = []
     if tune:
         log.info(
-            "%s: tuning over %d fold(s), %d train rows, %d columns (budget %ss)",
+            "%s: tuning %d fold(s) separately, %d train rows, %d columns (budget %ss each)",
             endpoint.key, len(fold_sets), train_rows.size, basis.n_cols, time_budget,
         )
-        study = tuning.study_name(
-            endpoint.key, spec.feature_set, basis.n_cols, len(fold_sets), params,
-            seed=seed, fold_signature=splits.fold_signature(fold_sets),
-        )
-        tuned = tuning.auto_tune(
-            x_train, y_train, fold_sets, params, seed=seed, time_budget=time_budget,
-            storage=tuning.study_path(models_dir, endpoint.key) if models_dir else None,
-            model_dir=tuning.booster_dir(models_dir, study) if models_dir else None,
-            study_name=study,
-        )
-        merged = tuned.params
-        tune_record = tuned.to_dict()
+        for index, fold in enumerate(fold_sets):
+            study = tuning.study_name(
+                endpoint.key, spec.feature_set, basis.n_cols, len(fold_sets), params,
+                seed=seed, fold_signature=f"{splits.fold_signature(fold_sets)}-{index}",
+            )
+            tuned = tuning.tune_fold(
+                x_train[fold.train], y_train[fold.train],
+                x_train[fold.test], y_train[fold.test],
+                params, seed=seed, time_budget=time_budget,
+                storage=tuning.study_path(models_dir, endpoint.key) if models_dir else None,
+                study_name=study,
+            )
+            if not tuned.boosters:
+                raise InputDataError(
+                    f"{endpoint.key}: the tuner returned no model for fold {index}"
+                )
+            booster = tuned.boosters[0]
+            best_iteration = int(getattr(booster, "best_iteration", 0) or booster.num_trees())
+            final.append(
+                cv.FoldFit(
+                    booster=booster,
+                    valid_pred=np.asarray(
+                        booster.predict(x_train[fold.test], num_iteration=best_iteration),
+                        dtype=np.float64,
+                    ),
+                    valid_rows=fold.test,
+                    best_iteration=best_iteration,
+                    used_early_stopping=True,
+                )
+            )
+            per_fold.append(tuned.to_dict())
+        merged = per_fold[0]["best_params"]
+        tune_record = {
+            "tuner": per_fold[0]["tuner"],
+            "per_fold": per_fold,
+            "best_params": merged,
+            "cv_score_biased": True,
+            "n_trials": sum(r["n_trials"] for r in per_fold),
+            "sampler_seed": seed,
+            "time_budget_seconds": time_budget,
+            "search_space_owner": "tuner",
+            "feature_fraction_grid_floor": 0.4,
+        }
     else:
         merged = tuning.default_params(
             endpoint.task, endpoint.metric, train_rows.size, num_threads=num_threads, seed=seed
         )
         merged.update({k: v for k, v in params.items() if k not in merged})
         tune_record = {"tuner": None, "best_params": merged, "cv_score_biased": True}
+        final = [
+            cv.fit_fold(x_train, y_train, f, merged, seed=seed, stop_on_fold=True)
+            for f in fold_sets
+        ]
 
-    # --- fit the ensemble: one model per fold, each stopping on its own fold ---
-    # These are the models that ship. The reference implementation keeps exactly
-    # the models its folds produced, so there is no refit at a pooled round count.
-    final = [
-        cv.fit_fold(x_train, y_train, f, merged, seed=seed, stop_on_fold=True)
-        for f in fold_sets
-    ]
     boosters = [f.booster for f in final]
     rounds = max((f.best_iteration for f in final), default=0)
     log.info(
-        "%s: fitted %d booster(s), early-stopped at %s rounds",
+        "%s: %d booster(s), early-stopped at %s rounds",
         endpoint.key, len(boosters), [f.best_iteration for f in final],
     )
 
@@ -254,32 +255,22 @@ def train_endpoint(
             stacked = np.column_stack([b.predict(x_train[fit.valid_rows]) for b in others])
             oof_spread[fit.valid_rows] = stacked.std(axis=1)
 
-    # --- post-fit calibration and the decision threshold -------------------
-    calibrator: calibrate.Calibrator | None = None
-    best_threshold: float | None = None
-    covered = pooled.covered & np.isfinite(oof)
-
-    if endpoint.is_classification:
-        weight = float(merged.get("scale_pos_weight", 1.0))
-        calibrator = calibrate.fit(
-            y_train[covered], oof[covered], scale_pos_weight=weight, metric=endpoint.metric
-        )
-        best_threshold, _ = metrics.best_threshold(y_train[covered], calibrator.apply(oof[covered]))
 
     # --- the one look at the held-out set ----------------------------------
-    x_test = prune.apply_basis(matrix[test_rows], basis)
+    x_test = matrix[test_rows]
     mean_fitted, spread_fitted = _predict_ensemble(boosters, x_test)
     y_test = y_published[test_rows]
 
-    if endpoint.is_classification:
-        prediction = calibrator.apply(mean_fitted)
-    else:
-        prediction = transforms.clamp(transform.inverse(mean_fitted), endpoint.output_range)
+    # The mean across the fold models, as published, with no calibration and no
+    # clamp. Calibration was an addition and a harmful one: fitted on out-of-fold
+    # predictions, Platt chose a negative slope on `carcinogens` and inverted the
+    # ranking, turning a held-out AUROC of 0.7506 into 0.2494.
+    prediction = mean_fitted
 
     test_metrics: dict[str, Any] = {
         k: float(v)
         for k, v in metrics.evaluate(
-            endpoint.task, y_test, prediction, shipped_threshold=best_threshold
+            endpoint.task, y_test, prediction
         ).items()
     }
     primary = metrics.bootstrap(
@@ -330,8 +321,6 @@ def train_endpoint(
         rounds=rounds,
         params=merged,
         transform=transform,
-        calibrator=calibrator,
-        best_threshold=best_threshold,
         test_metrics=test_metrics,
         cv_record=cv_record,
         provenance=provenance,

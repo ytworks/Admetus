@@ -224,15 +224,17 @@ def load(endpoint: Endpoint, directory: Path, verify_digest: bool = True) -> Dat
     if n_short_row:
         log.warning("%s: skipped %d row(s) with too few fields", endpoint.key, n_short_row)
 
-    # Deduplicate on the published structure, as the upstream loaders do. Rows that
-    # disagree on the label are resolved rather than silently kept as contradictions.
-    deduped = _dedupe(ids, smiles, labels, endpoint)
-
+    # Rows are kept as published. Collapsing duplicate structures -- taking the
+    # median for regression, dropping groups whose labels disagree -- was an
+    # addition: the reference implementation builds its library row by row and
+    # splits whatever that gives. Two rows with the same structure now land where
+    # the random split puts them, which is also what the published benchmark does
+    # with its own splits.
     dataset = Dataset(
         key=endpoint.key,
-        ids=deduped["ids"],
-        smiles=deduped["smiles"],
-        y=np.asarray(deduped["y"], dtype=np.float64),
+        ids=ids,
+        smiles=smiles,
+        y=np.asarray(labels, dtype=np.float64),
         task=endpoint.task,
         provenance={
             "path": str(path),
@@ -241,60 +243,13 @@ def load(endpoint: Endpoint, directory: Path, verify_digest: bool = True) -> Dat
             "n_wrong_species": n_wrong_species,
             "n_missing_label": n_missing_label,
             "n_short_row": n_short_row,
-            "n_duplicate_removed": deduped["n_removed"],
-            "n_label_conflict": deduped["n_conflict"],
-            "n_rows": len(deduped["smiles"]),
+            "n_rows": len(smiles),
             "label_column": endpoint.label_name or header[label_at],
             "species_filter": endpoint.species_filter,
         },
     )
     _check_labels(dataset, endpoint, n_raw)
     return dataset
-
-
-def _dedupe(ids: list[str], smiles: list[str], labels: list[float], endpoint: Endpoint) -> dict:
-    """Collapse rows that share a structure.
-
-    Regression takes the median of the group, which is robust to a single bad
-    replicate. Classification keeps a unanimous label and drops the group when
-    replicates disagree, because a contradictory label teaches nothing.
-    """
-    order: dict[str, list[int]] = {}
-    for position, structure in enumerate(smiles):
-        order.setdefault(structure, []).append(position)
-
-    out_ids: list[str] = []
-    out_smiles: list[str] = []
-    out_y: list[float] = []
-    n_removed = 0
-    n_conflict = 0
-
-    for structure, positions in order.items():
-        if len(positions) == 1:
-            out_ids.append(ids[positions[0]])
-            out_smiles.append(structure)
-            out_y.append(labels[positions[0]])
-            continue
-        n_removed += len(positions) - 1
-        values = [labels[p] for p in positions]
-        if endpoint.task == "classification":
-            if len(set(values)) > 1:
-                n_conflict += 1
-                continue
-            resolved = values[0]
-        else:
-            resolved = float(np.median(values))
-        out_ids.append(ids[positions[0]])
-        out_smiles.append(structure)
-        out_y.append(resolved)
-
-    if n_removed:
-        log.debug("%s: collapsed %d duplicate row(s), dropped %d conflicting group(s)",
-                  endpoint.key, n_removed, n_conflict)
-    return {
-        "ids": out_ids, "smiles": out_smiles, "y": out_y,
-        "n_removed": n_removed, "n_conflict": n_conflict,
-    }
 
 
 def _check_labels(dataset: Dataset, endpoint: Endpoint, n_raw: int) -> None:

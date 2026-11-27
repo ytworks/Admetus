@@ -46,9 +46,14 @@ EXPECTED_FAMILY_COUNT = 8
 #: 3-point: C(8+2, 3) = 120 family triples x 9^3 bin triples.
 PHARM_SIG_SIZE = {2: 324, 3: 87_804}
 
-#: Ordered SMILES standardization pipeline. Each name maps to a step in
-#: :mod:`admetus.chem.standardize`.
-DEFAULT_STANDARDIZE: tuple[str, ...] = ("cleanup", "largest_fragment", "uncharge")
+#: Standardization applied before featurizing: none. The reference implementation
+#: parses the SMILES and fingerprints it, so cleanup, largest-fragment selection and
+#: uncharging were all additions. They changed which molecule the model sees -- a
+#: salt became its free base -- which is a modelling decision, not tidying.
+#:
+#: The pipeline itself still exists in :mod:`admetus.chem.standardize` and is part of
+#: the spec digest, so a bundle written with steps is refused here rather than used.
+DEFAULT_STANDARDIZE: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

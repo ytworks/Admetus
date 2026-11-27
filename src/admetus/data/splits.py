@@ -16,8 +16,10 @@ grouping by input string rather than by standardized structure put 9 of 129 held
 hERG molecules in a scaffold the training set also held.
 
 ``KFold`` is used without shuffling, as the reference does, because the rows reaching
-it are already in random order: ``train_test_split`` shuffles before it cuts. Adding a
-second shuffle would only make the fold assignment depend on two seeds instead of one.
+it are already in random order: ``train_test_split`` shuffles and **returns that
+order**. That last part is load-bearing. Sorting the indices back into file order
+leaves ``KFold`` cutting contiguous blocks of a file that is sorted by label, which
+is how a validation fold ends up entirely positive.
 """
 
 from __future__ import annotations
@@ -78,7 +80,15 @@ def random_holdout(
             f"a {test_fraction:.0%} holdout of {n_rows} row(s) leaves "
             f"{train.size} training and {test.size} evaluation rows"
         )
-    return Split(train=np.sort(train), test=np.sort(test))
+    # Returned in the shuffled order `train_test_split` produced, not sorted back
+    # into file order. Sorting looked harmless and was not: the folds below take
+    # contiguous blocks, so file order decides fold membership, and these files are
+    # sorted by label. On `bioavailability` that gave a validation fold of 171 rows
+    # that were 100% positive, where binary_error is minimal at iteration 1 -- the
+    # model stopped immediately and held-out AUROC came out at 0.5121 against the
+    # reference's 0.6867. The reference keeps the shuffled order, so its folds are
+    # effectively random.
+    return Split(train=train, test=test)
 
 
 def cv_folds(n_rows: int, n_splits: int = DEFAULT_FOLDS) -> list[Split]:

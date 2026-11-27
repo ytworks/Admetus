@@ -124,8 +124,6 @@ def save(model: TrainedModel, directory: Path) -> Path:
             "params": {k: v for k, v in model.params.items() if k != "num_threads"},
         },
         "transform": model.transform.to_dict(),
-        "calibrator": model.calibrator.to_dict() if model.calibrator else None,
-        "decision_threshold": model.best_threshold,
         "metrics": model.test_metrics,
         "cross_validation": model.cv_record,
         "provenance": model.provenance,

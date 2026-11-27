@@ -118,6 +118,20 @@ def compute(metric: str, y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return fn(np.asarray(y_true), np.asarray(y_pred))
 
 
+def pearson(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """Pearson correlation between prediction and label.
+
+    What the reference implementation prints for a regression endpoint
+    (``np.corrcoef(y_pred, y_true)[0, 1]``). Undefined when either side has no
+    spread, which is reported as ``nan`` rather than as zero correlation.
+    """
+    a = np.asarray(y_true, dtype=np.float64)
+    b = np.asarray(y_pred, dtype=np.float64)
+    if a.size < 2 or not np.any(np.isfinite(a)) or np.std(a) == 0 or np.std(b) == 0:
+        return float("nan")
+    return float(np.corrcoef(b, a)[0, 1])
+
+
 def evaluate(
     task: str, y_true: np.ndarray, y_pred: np.ndarray, shipped_threshold: float | None = None
 ) -> dict[str, float]:
@@ -163,6 +177,10 @@ def evaluate(
         "mae": mae(y_true, y_pred),
         "rmse": rmse(y_true, y_pred),
         "spearman": spearman(y_true, y_pred),
+        # The reference implementation's own figure for a regression endpoint: the
+        # Pearson correlation between prediction and label, which its notebooks plot
+        # and print. Reported so a run here can be compared with those directly.
+        "pearson": pearson(y_true, y_pred),
     }
 
 
@@ -261,6 +279,7 @@ def bootstrap(
 
 
 __all__ = [
+    "pearson",
     "HIGHER_IS_BETTER",
     "METRICS",
     "Interval",

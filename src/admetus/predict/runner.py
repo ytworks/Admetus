@@ -37,7 +37,7 @@ from admetus.chem.parallel import DEFAULT_BATCH_SIZE, Featurizer, resolve_jobs
 from admetus.errors import InputDataError
 from admetus.logging import get_logger, progress_disabled
 from admetus.predict import csvio
-from admetus.train import prune, transforms
+from admetus.train import prune
 
 log = get_logger("predict")
 
@@ -163,16 +163,10 @@ def predict_block(model: LoadedModel, matrix, options: Options) -> EndpointOutpu
     """Predict one endpoint over a block of featurized molecules."""
     narrowed = prune.apply_basis(matrix, model.basis)
     stacked = np.column_stack([b.predict(narrowed) for b in model.boosters])
-    mean_fitted = stacked.mean(axis=1)
-    spread_fitted = stacked.std(axis=1)
-
-    if model.is_classification:
-        value = model.calibrator.apply(mean_fitted) if model.calibrator else mean_fitted
-        spread = spread_fitted
-    else:
-        value = transforms.clamp(model.transform.inverse(mean_fitted), model.output_range)
-        # Reported in the space it was computed in, which the column name states.
-        spread = spread_fitted
+    # The mean across the fold models and their spread, which is what the reference
+    # implementation reports as Predict and Confidence. No calibration and no clamp.
+    value = stacked.mean(axis=1)
+    spread = stacked.std(axis=1)
 
     precision = options.precision
     rows = [

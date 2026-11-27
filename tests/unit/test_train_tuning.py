@@ -13,7 +13,7 @@ import pytest
 from scipy import sparse
 
 from admetus.data.splits import Split
-from admetus.train import cv, tuning
+from admetus.train import tuning
 
 
 def toy(n_rows: int = 160, n_cols: int = 300, seed: int = 0, classification: bool = True):
@@ -68,59 +68,42 @@ def test_the_import_path_is_the_supported_one():
 
 
 @pytest.mark.parametrize(
-    ("task", "metric", "expected_metric", "expected_objective"),
+    ("task", "metric", "expected_objective"),
     [
-        ("classification", "auroc", "auc", "binary"),
-        ("classification", "auprc", "average_precision", "binary"),
-        ("regression", "mae", "l1", "regression_l1"),
-        ("regression", "spearman", "l2", "regression"),
+        ("classification", "auroc", "binary"),
+        ("classification", "auprc", "binary"),
+        ("regression", "mae", "regression"),
+        ("regression", "spearman", "regression"),
     ],
 )
-def test_metric_is_aligned_with_the_endpoint(task, metric, expected_metric, expected_objective):
-    """A 0/1 error rate at a fixed threshold measures something nobody reports."""
+def test_the_objective_and_metric_are_the_reference_implementation_s(task, metric, expected_objective):
+    """Four keys, and the endpoint's own metric is not among them.
+
+    These used to be aligned with the metric the endpoint is judged on -- `auc`,
+    `average_precision`, `l1` -- on the argument that a 0/1 error rate at a fixed
+    0.5 threshold measures something nobody reports. True, and not what was asked
+    for: the reference tunes against `binary_error` and `rmse`, so that is what the
+    tuner optimizes. The endpoint's metric still decides what is reported.
+    """
     params = tuning.fixed_params(task, metric)
-    assert params["metric"] == expected_metric
     assert params["objective"] == expected_objective
-    assert params["metric"] != "binary_error"
+    assert params["metric"] == ("binary_error" if task == "classification" else "rmse")
+    assert params["boosting_type"] == "gbdt"
+    assert params["verbosity"] == -1
 
 
-def test_fixed_params_pin_what_the_tuner_cannot_search():
-    params = tuning.fixed_params("classification", "auroc", scale_pos_weight=3.0, seed=7)
-    assert params["learning_rate"] == cv.LEARNING_RATE == 0.03
-    assert params["scale_pos_weight"] == 3.0
+def test_nothing_is_added_beyond_the_reference_except_knobs():
+    """What is set has to be the reference's, plus things that cannot change a model."""
+    params = tuning.fixed_params("classification", "auroc", seed=7)
+
+    assert params["seed"] == 7
     assert params["deterministic"] is True
     assert params["force_row_wise"] is True
-    assert params["seed"] == 7
-    # The tuner varies min_child_samples and turns this off itself; recording it
-    # here keeps the bundle's record honest about what ran.
-    assert params["feature_pre_filter"] is False
-
-
-def test_no_weight_is_applied_to_a_balanced_endpoint():
-    assert tuning.class_weight(0.45, 450, 550) == 1.0
-    assert tuning.class_weight(0.33, 330, 670) == 1.0
-
-
-def test_moderate_imbalance_gets_the_square_root_of_the_ratio():
-    weight = tuning.class_weight(0.10, 100, 900)
-    assert weight == pytest.approx(3.0)
-
-
-def test_severe_imbalance_gets_the_full_ratio():
-    weight = tuning.class_weight(0.04, 40, 960)
-    assert weight == pytest.approx(24.0)
-
-
-def test_degenerate_counts_do_not_produce_a_weight():
-    assert tuning.class_weight(0.0, 0, 100) == 1.0
-    assert tuning.class_weight(1.0, 100, 0) == 1.0
-
-
-def test_study_direction_follows_the_metric():
-    assert tuning._direction("auc") == "maximize"
-    assert tuning._direction("average_precision") == "maximize"
-    assert tuning._direction("l1") == "minimize"
-    assert tuning._direction("l2") == "minimize"
+    # Exact for a 0/1 feature space rather than an approximation of it.
+    assert params["max_bin"] == 2
+    # Each of these was an unrequested addition and is gone.
+    for absent in ("learning_rate", "scale_pos_weight", "bagging_fraction", "feature_pre_filter"):
+        assert absent not in params
 
 
 def test_study_path_sits_beside_the_bundles_not_inside_one(tmp_path):
@@ -130,34 +113,45 @@ def test_study_path_sits_beside_the_bundles_not_inside_one(tmp_path):
     assert tuning.study_path(tmp_path, "dili") == tmp_path / "studies" / "dili.sqlite"
 
 
+def tune_one(matrix, y, params, tmp_path, name="t", seed=0, budget=20):
+    """Tune the first of three folds, which is how the trainer calls it."""
+    fold = folds_of(matrix.shape[0])[0]
+    return tuning.tune_fold(
+        matrix[fold.train], y[fold.train], matrix[fold.test], y[fold.test],
+        params, seed=seed, time_budget=budget,
+        storage=tmp_path / f"{name}.sqlite", study_name=name,
+    )
+
+
 @pytest.mark.slow
-def test_tuner_accepts_sparse_input_and_our_folds(tmp_path):
+def test_the_tuner_fits_one_fold_and_returns_its_model(tmp_path):
+    """One call per fold, and the booster it returns is the ensemble member.
+
+    This replaced a single run across all folds, which tuned one parameter set
+    against the pooled fold score and then needed a separate fit. The reference
+    implementation calls the tuner once per fold, so the folds end up with different
+    parameters and the trial count is per fold.
+    """
     matrix, y = toy()
     params = tuning.fixed_params("classification", "auroc", num_threads=2)
-    result = tuning.auto_tune(
-        matrix, y, folds_of(matrix.shape[0]), params, seed=0, time_budget=20,
-        storage=tmp_path / "study.sqlite", study_name="t",
-    )
+    result = tune_one(matrix, y, params, tmp_path)
+
     assert result.n_trials > 0
     assert np.isfinite(result.score)
-    # One booster per fold, which is what the ensemble and the out-of-fold
-    # predictions both need.
-    assert len(result.boosters) == 3
-    # Predicting through a fold booster must work on a CSR slice.
+    assert len(result.boosters) == 1
     assert result.boosters[0].predict(matrix[:5]).shape == (5,)
+    # Early-stopped on its own validation rows, so it carries a best iteration.
+    assert result.boosters[0].best_iteration >= 1
 
 
 @pytest.mark.slow
 def test_the_tuner_leaves_our_fixed_parameters_alone(tmp_path):
     matrix, y = toy()
-    params = tuning.fixed_params("classification", "auprc", scale_pos_weight=2.5, num_threads=2)
-    result = tuning.auto_tune(
-        matrix, y, folds_of(matrix.shape[0]), params, seed=0, time_budget=20,
-        storage=tmp_path / "s.sqlite", study_name="t",
-    )
-    assert result.params["learning_rate"] == 0.03
-    assert result.params["scale_pos_weight"] == 2.5
-    assert result.params["metric"] == "average_precision"
+    params = tuning.fixed_params("classification", "auprc", num_threads=2)
+    result = tune_one(matrix, y, params, tmp_path, name="s")
+    assert result.params["metric"] == "binary_error"
+    assert result.params["objective"] == "binary"
+    assert result.params["deterministic"] is True
     # It does choose these, and the record should say so rather than claiming
     # credit for everything in the merged set.
     assert set(result.tuned_keys) <= {
@@ -170,17 +164,10 @@ def test_the_tuner_leaves_our_fixed_parameters_alone(tmp_path):
 def test_the_study_resumes_from_sqlite(tmp_path):
     matrix, y = toy()
     params = tuning.fixed_params("classification", "auroc", num_threads=2)
-    storage = tmp_path / "resume.sqlite"
-    first = tuning.auto_tune(
-        matrix, y, folds_of(matrix.shape[0]), params, seed=0, time_budget=10,
-        storage=storage, study_name="resume",
-    )
-    second = tuning.auto_tune(
-        matrix, y, folds_of(matrix.shape[0]), params, seed=0, time_budget=10,
-        storage=storage, study_name="resume",
-    )
+    first = tune_one(matrix, y, params, tmp_path, name="resume", budget=10)
+    second = tune_one(matrix, y, params, tmp_path, name="resume", budget=10)
     assert second.n_trials >= first.n_trials
-    assert storage.is_file()
+    assert (tmp_path / "resume.sqlite").is_file()
 
 
 @pytest.mark.slow
@@ -188,10 +175,7 @@ def test_a_seed_makes_the_run_reproducible(tmp_path):
     matrix, y = toy()
     params = tuning.fixed_params("classification", "auroc", num_threads=2)
     runs = [
-        tuning.auto_tune(
-            matrix, y, folds_of(matrix.shape[0]), params, seed=11, time_budget=15,
-            storage=tmp_path / f"seeded_{i}.sqlite", study_name="s",
-        )
+        tune_one(matrix, y, params, tmp_path, name=f"seeded_{i}", seed=11, budget=15)
         for i in range(2)
     ]
     assert runs[0].score == runs[1].score
@@ -209,7 +193,7 @@ def test_the_record_states_what_the_tuner_owns_and_that_cv_is_biased():
     assert record["search_space_owner"] == "tuner"
     # The two measured costs of delegating the search space, written down.
     assert record["feature_fraction_grid_floor"] == 0.4
-    assert record["feature_pre_filter"] is False
+    assert "feature_pre_filter" not in record
     assert record["tuned_by_tuner"] == ["num_leaves"]
     # Thread count is a machine detail, not a hyperparameter.
     assert "num_threads" not in record["best_params"]
@@ -219,7 +203,8 @@ def test_untuned_defaults_respect_the_tuner_grid_floor():
     """Without tuning we still pick a feature_fraction the tuner could have chosen."""
     params = tuning.default_params("classification", "auroc", 400)
     assert params["feature_fraction"] >= 0.4
-    assert params["learning_rate"] == 0.03
+    # No learning rate is set any more: the reference leaves it to LightGBM.
+    assert "learning_rate" not in params
 
 
 def test_the_study_lives_outside_the_bundle_that_gets_replaced():
@@ -244,11 +229,13 @@ def test_a_study_is_named_after_the_settings_its_trials_depend_on():
     from admetus.train.tuning import fixed_params, study_name
 
     auroc = fixed_params("classification", "auroc")
-    auprc = fixed_params("classification", "auprc")
+    # Both classification endpoints now tune against binary_error, so the objective
+    # no longer distinguishes them; a regression endpoint does.
+    other = fixed_params("regression", "rmse")
 
     base = study_name("dili", "morgan_p2", 1632, 5, auroc)
     assert base == study_name("dili", "morgan_p2", 1632, 5, auroc)          # stable
     assert base != study_name("dili", "morgan_p23", 7096, 5, auroc)         # feature set
     assert base != study_name("dili", "morgan_p2", 1632, 3, auroc)          # fold count
-    assert base != study_name("dili", "morgan_p2", 1632, 5, auprc)          # objective
+    assert base != study_name("dili", "morgan_p2", 1632, 5, other)          # objective
     assert base != study_name("herg", "morgan_p2", 1632, 5, auroc)          # endpoint

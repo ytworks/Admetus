@@ -100,37 +100,6 @@ def test_missing_label_column_lists_what_is_available(tmp_path):
         loader.load(make_endpoint(label_name="SR-MMP"), directory)
 
 
-def test_duplicate_structures_are_collapsed_for_regression_by_median(tmp_path):
-    directory = write_tab(
-        tmp_path,
-        ["Drug_ID\tDrug\tY", "a\tCCO\t1.0", "b\tCCO\t3.0", "c\tCCO\t11.0", "d\tCCN\t5.0"],
-    )
-    endpoint = make_endpoint(task="regression", metric="mae")
-    dataset = loader.load(endpoint, directory)
-    assert dataset.smiles == ["CCO", "CCN"]
-    assert dataset.y.tolist() == [3.0, 5.0]
-    assert dataset.provenance["n_duplicate_removed"] == 2
-
-
-def test_contradictory_classification_duplicates_are_dropped(tmp_path):
-    """A structure labelled both 0 and 1 teaches nothing, so the group goes."""
-    directory = write_tab(
-        tmp_path, ["Drug_ID\tDrug\tY", "a\tCCO\t1", "b\tCCO\t0", "c\tCCN\t1", "d\tCCC\t0"]
-    )
-    dataset = loader.load(make_endpoint(), directory)
-    assert "CCO" not in dataset.smiles
-    assert dataset.provenance["n_label_conflict"] == 1
-
-
-def test_unanimous_classification_duplicates_are_kept_once(tmp_path):
-    directory = write_tab(
-        tmp_path, ["Drug_ID\tDrug\tY", "a\tCCO\t1", "b\tCCO\t1", "c\tCCN\t0"]
-    )
-    dataset = loader.load(make_endpoint(), directory)
-    assert dataset.smiles == ["CCO", "CCN"]
-    assert dataset.provenance["n_duplicate_removed"] == 1
-
-
 def test_non_binary_label_in_a_classification_file_is_dropped(tmp_path):
     directory = write_tab(tmp_path, ["Drug_ID\tDrug\tY", "a\tCCO\t1", "b\tCCN\t0.5", "c\tCCC\t0"])
     dataset = loader.load(make_endpoint(), directory)
@@ -189,3 +158,22 @@ def test_regression_summary_reports_the_range(tmp_path):
     dataset = loader.load(make_endpoint(task="regression", metric="mae"), directory)
     assert "1.5" in dataset.summary()
     assert np.isnan(dataset.pos_rate)
+
+
+def test_rows_are_kept_as_published_including_duplicates(tmp_path):
+    """Collapsing duplicate structures was an addition, and it is gone.
+
+    The reference implementation builds its library row by row from what the source
+    returns and splits whatever that gives. Two rows with the same structure now land
+    wherever the random split puts them.
+    """
+    directory = write_tab(
+        tmp_path,
+        ["Drug_ID\tDrug\tY", "1\tCCO\t1.0", "2\tCCO\t3.0", "3\tCCN\t2.0"],
+    )
+    dataset = loader.load(make_endpoint(task="regression", metric="mae"), directory)
+
+    assert len(dataset) == 3
+    assert dataset.smiles == ["CCO", "CCO", "CCN"]
+    assert dataset.y.tolist() == [1.0, 3.0, 2.0]
+    assert "n_duplicate_removed" not in dataset.provenance

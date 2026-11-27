@@ -40,21 +40,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-from scipy import sparse
-
 from admetus._compat import load_lightgbm
-from admetus.data.splits import Split
 from admetus.logging import get_logger, progress_disabled
 from admetus.train import cv
 
 log = get_logger("train.tuning")
-
-#: Positive rate at or above which class weighting is not applied at all.
-BALANCED_POS_RATE = 0.20
-
-#: Positive rate below which the full negative/positive ratio is used.
-SEVERE_POS_RATE = 0.05
 
 #: Metrics where the tuner should maximize.
 MAXIMIZE_METRICS = frozenset({"auc", "average_precision", "ndcg", "map"})
@@ -71,30 +61,6 @@ TUNER_EARLY_STOPPING = 50
 #: 600 rows and full width spent over a minute on one run, and real endpoints
 #: reach 13,445 rows.
 DEFAULT_TIME_BUDGET_SECONDS = 900
-
-
-def class_weight(pos_rate: float, n_pos: int, n_neg: int) -> float:
-    """Pick ``scale_pos_weight`` from the measured positive rate.
-
-    A fixed value rather than a range, because the tuner cannot search it.
-
-    Both reported classification metrics rank rather than threshold, so weighting
-    buys little; it is applied only where the imbalance is real. Of the twenty
-    classification endpoints here, one assay is around 4% positive and two
-    substrate datasets sit between 20 and 30%; the CYP inhibition panels are
-    30-46% and need nothing.
-
-    Returns:
-        The weight, ``1.0`` when none is warranted.
-    """
-    if n_pos == 0 or n_neg == 0 or pos_rate >= BALANCED_POS_RATE:
-        return 1.0
-    ratio = n_neg / n_pos
-    if pos_rate >= SEVERE_POS_RATE:
-        # The full ratio is an over-aggressive folk default; its square root
-        # shifts the gradient without flattening the probabilities.
-        return float(np.sqrt(ratio))
-    return float(ratio)
 
 
 @dataclass
@@ -121,24 +87,28 @@ class TuneResult:
     time_budget: int | None
     boosters: list[Any] = field(default_factory=list)
     tuned_keys: list[str] = field(default_factory=list)
+    #: The tuner raised partway through and this fold fell back to the best trial it
+    #: had completed. Recorded in the bundle, because a fold tuned less than the
+    #: others is something a reader should be told rather than left to infer.
+    tuner_failed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         """The record stored in the bundle."""
         return {
-            "tuner": "optuna_integration.lightgbm.LightGBMTunerCV",
+            "tuner": "optuna_integration.lightgbm.LightGBMTuner, one run per fold",
             "best_params": {k: v for k, v in self.params.items() if k != "num_threads"},
             "tuned_by_tuner": self.tuned_keys,
             "best_cv_score": self.score,
             "n_trials": self.n_trials,
             "sampler_seed": self.seed,
             "time_budget_seconds": self.time_budget,
-            # The tuner selects on the same fold predictions it scores, and its
-            # objective is the mean over folds. This ranks candidates; it is not a
-            # performance estimate. Reported numbers come from the held-out set.
+            # The tuner selects on the very rows it early-stops against, so this
+            # score is optimistic as well as being a selection score. Reported
+            # numbers come from the held-out 20%.
             "cv_score_biased": True,
+            "tuner_failed": self.tuner_failed,
             "search_space_owner": "tuner",
             "feature_fraction_grid_floor": 0.4,
-            "feature_pre_filter": False,
         }
 
 
@@ -150,16 +120,12 @@ STUDIES_DIR = "studies"
 def booster_dir(models_dir: Path, study: str) -> Path:
     """Where one study keeps each trial's per-fold boosters.
 
-    ``LightGBMTunerCV`` holds the best trial's boosters in memory unless it is given
-    somewhere to put them, and a resumed study has no memory of the run that found
-    them. Without this, ``get_best_booster`` on a resumed study raises and the
-    production round count silently falls back to its default.
+    The tuner holds the best trial's booster in memory unless it is given somewhere
+    to put it, and a resumed study has no memory of the run that found it. Without
+    this, ``get_best_booster`` on a resumed study raises and the fold has no model.
 
-    Keyed by the **study**, not by the endpoint. One directory per endpoint let a run
-    under a different feature set overwrite the file belonging to another study's
-    winning trial: the first study kept its score and its 65 trials, and its resumed
-    ensemble came back at 350 rounds instead of 143, having loaded somebody else's
-    booster. Each study now gets its own.
+    Keyed by the **study**, not by the endpoint, so a run under different settings
+    cannot overwrite the file belonging to another study's winning trial.
     """
     return Path(models_dir) / STUDIES_DIR / f"{study}-boosters"
 
@@ -219,24 +185,20 @@ def study_name(
     return f"admetus-{key}-{digest}"
 
 
-def fixed_params(
-    task: str,
-    metric: str,
-    scale_pos_weight: float = 1.0,
-    objective: str | None = None,
-    num_threads: int = 0,
-    seed: int = 0,
-) -> dict[str, Any]:
-    """The parameters we set by rule, which the tuner then builds on."""
-    params = cv.base_params(task, metric, num_threads=num_threads, seed=seed)
-    if objective:
-        params["objective"] = objective
-    if scale_pos_weight != 1.0:
-        params["scale_pos_weight"] = scale_pos_weight
-    # The tuner varies min_child_samples, so it disables this itself. Stated here
-    # so the bundle's record matches what actually ran.
-    params["feature_pre_filter"] = False
-    return params
+def fixed_params(task: str, metric: str, num_threads: int = 0, seed: int = 0) -> dict[str, Any]:
+    """The parameters we set by rule, which the tuner then builds on.
+
+    There is nothing left to set beyond the reference implementation's own, which
+    :func:`admetus.train.cv.base_params` returns. What this used to add:
+
+    * ``scale_pos_weight``, derived from the measured positive rate. The reference
+      applies no class weighting, and its absence is the arrangement that was asked
+      for. Both reported classification metrics rank rather than threshold, so the
+      weighting bought little even where the imbalance is real.
+    * ``regression_l1`` for the endpoints judged on MAE.
+    * ``feature_pre_filter: False``, which the tuner sets for itself anyway.
+    """
+    return cv.base_params(task, metric, num_threads=num_threads, seed=seed)
 
 
 def _direction(metric: str) -> str:
@@ -244,43 +206,101 @@ def _direction(metric: str) -> str:
     return "maximize" if metric in MAXIMIZE_METRICS else "minimize"
 
 
-def auto_tune(
-    matrix: sparse.csr_matrix,
-    y: np.ndarray,
-    folds: list[Split],
+def _fallback_fit(
+    lgb,
+    x_train,
+    y_train,
+    x_valid,
+    y_valid,
+    params: dict[str, Any],
+    study: Any,
+    seed: int,
+    time_budget: int | None,
+) -> TuneResult:
+    """Fit one fold when the tuner could not finish, using the best trial it had."""
+    import optuna
+
+    completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    merged = dict(params)
+    score = float("nan")
+    if completed:
+        best_trial = min(
+            completed,
+            key=lambda t: t.value if study.direction == optuna.study.StudyDirection.MINIMIZE
+            else -t.value,
+        )
+        merged.update(best_trial.params)
+        score = float(best_trial.value)
+
+    fit_set = lgb.Dataset(x_train, label=y_train, params=merged, free_raw_data=False)
+    valid_set = lgb.Dataset(
+        x_valid, label=y_valid, reference=fit_set, params=merged, free_raw_data=False
+    )
+    booster = lgb.train(
+        merged,
+        fit_set,
+        num_boost_round=TUNER_MAX_ROUNDS,
+        valid_sets=[valid_set],
+        callbacks=[lgb.early_stopping(TUNER_EARLY_STOPPING, verbose=False)],
+    )
+    return TuneResult(
+        params=merged,
+        score=score,
+        n_trials=len(completed),
+        seed=seed,
+        time_budget=time_budget,
+        boosters=[booster],
+        tuned_keys=sorted(k for k in merged if k not in params),
+        tuner_failed=True,
+    )
+
+
+def tune_fold(
+    x_train,
+    y_train,
+    x_valid,
+    y_valid,
     params: dict[str, Any],
     seed: int = 0,
     time_budget: int | None = DEFAULT_TIME_BUDGET_SECONDS,
     storage: Path | None = None,
     study_name: str = "admetus",
-    model_dir: Path | None = None,
 ) -> TuneResult:
-    """Tune hyperparameters with the stepwise LightGBM tuner.
+    """Tune and fit **one** fold, returning the model the tuner settled on.
+
+    This is the reference implementation's arrangement: ``lgb.train`` from
+    ``optuna.integration.lightgbm`` is called once per fold, with that fold's
+    validation rows as the watchlist, and the booster it returns is the ensemble
+    member. Each fold therefore gets its own parameters and its own early-stopping
+    point, and the 68 trials the tuner runs are per fold -- 204 for three folds,
+    which is the trial count the reference's own notebooks show.
+
+    It replaces a single ``LightGBMTunerCV`` run across all folds, which tuned one
+    parameter set against the pooled fold score and then needed a separate fit. That
+    is a different search over a different objective, and it was not what was asked
+    for.
 
     Args:
-        matrix: Training features, already narrowed to the endpoint's basis.
-        y: Training labels in the fitted space.
-        folds: Scaffold-grouped cross-validation folds, passed straight through.
-        params: The parameters we fix by rule, including objective and metric.
-        seed: Sampler seed. Recorded, since an unseeded sampler would make the
-            command line's determinism promise false and change results on resume.
-        time_budget: Wall-clock cap in seconds, or ``None`` for no cap.
+        x_train: The fold's training features.
+        y_train: The fold's training labels.
+        x_valid: The fold's validation features, used for early stopping.
+        y_valid: The fold's validation labels.
+        params: The fixed parameters, including objective and metric.
+        seed: Sampler seed, recorded so the run is reproducible.
+        time_budget: Wall-clock cap for this fold, in seconds.
         storage: SQLite path for a resumable study.
         study_name: Study name inside the storage.
-        model_dir: Where the tuner persists per-trial boosters, so a resumed study
-            can still produce the best trial's folds.
 
     Returns:
-        The :class:`TuneResult`. Its per-fold boosters are the tuner's own; the
-        ensemble that ships is fitted separately from the chosen parameters.
+        A :class:`TuneResult` whose single booster is this fold's model.
     """
     import optuna
-    from optuna_integration.lightgbm import LightGBMTunerCV
+    from optuna_integration.lightgbm import LightGBMTuner
 
     lgb = load_lightgbm()
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-    metric = str(params.get("metric", "auc"))
+    metric = str(params.get("metric", "binary_error"))
     storage_url = None
     if storage is not None:
         Path(storage).parent.mkdir(parents=True, exist_ok=True)
@@ -297,32 +317,40 @@ def auto_tune(
     if already:
         log.info("resuming tuning study with %d completed trial(s)", already)
 
-    # The tuner takes folds as (train, valid) index pairs.
-    fold_pairs = [(f.train, f.test) for f in folds]
-    dataset = lgb.Dataset(matrix, label=y, params=params, free_raw_data=False)
+    fit_set = lgb.Dataset(x_train, label=y_train, params=params, free_raw_data=False)
+    valid_set = lgb.Dataset(
+        x_valid, label=y_valid, reference=fit_set, params=params, free_raw_data=False
+    )
 
-    if model_dir is not None:
-        Path(model_dir).mkdir(parents=True, exist_ok=True)
-
-    tuner = LightGBMTunerCV(
+    tuner = LightGBMTuner(
         dict(params),
-        dataset,
-        folds=fold_pairs,
-        model_dir=str(model_dir) if model_dir else None,
+        fit_set,
+        valid_sets=[valid_set],
         num_boost_round=TUNER_MAX_ROUNDS,
         callbacks=[lgb.early_stopping(TUNER_EARLY_STOPPING, verbose=False)],
         time_budget=time_budget,
         study=study,
-        seed=seed,
         optuna_seed=seed,
-        return_cvbooster=True,
         show_progress_bar=not progress_disabled(),
     )
-    tuner.run()
+    try:
+        tuner.run()
+    except Exception as exc:  # noqa: BLE001 - the tuner's own failure, not ours
+        # LightGBMTuner raises `AssertionError: Should not reach.` from inside its
+        # stepwise search on some runs, and a tuner that gives up must not take the
+        # endpoint with it. Whatever trials completed are still in the study, so the
+        # caller gets the best of those; with none, it gets the fixed parameters and
+        # a straight early-stopped fit.
+        completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+        log.warning(
+            "the tuner failed after %d completed trial(s) (%s: %s); falling back to the best "
+            "of those", len(completed), type(exc).__name__, exc,
+        )
+        return _fallback_fit(
+            lgb, x_train, y_train, x_valid, y_valid, params, study, seed, time_budget
+        )
 
     best = dict(params)
-    # best_params is the full merged set, so diff it against what we fixed to
-    # record only what the tuner actually chose.
     tuned_keys = sorted(
         k for k, v in tuner.best_params.items() if k not in params or params[k] != v
     )
@@ -330,16 +358,11 @@ def auto_tune(
 
     boosters: list[Any] = []
     try:
-        cvbooster = tuner.get_best_booster()
-        boosters = list(cvbooster.boosters)
+        boosters = [tuner.get_best_booster()]
     except Exception as exc:  # pragma: no cover - only if the tuner kept nothing
-        log.warning("the tuner returned no per-fold boosters (%s); refitting from scratch", exc)
+        log.warning("the tuner returned no booster for this fold (%s)", exc)
 
     completed = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
-    log.info(
-        "tuned %d trial(s), best %s = %.4f, tuner chose %s",
-        completed, metric, tuner.best_score, ", ".join(tuned_keys),
-    )
     return TuneResult(
         params=best,
         score=float(tuner.best_score),
@@ -370,17 +393,14 @@ def default_params(task: str, metric: str, n_train: int, num_threads: int = 0, s
 
 
 __all__ = [
-    "BALANCED_POS_RATE",
     "STUDIES_DIR",
     "booster_dir",
     "DEFAULT_TIME_BUDGET_SECONDS",
     "MAXIMIZE_METRICS",
-    "SEVERE_POS_RATE",
     "TUNER_EARLY_STOPPING",
     "TUNER_MAX_ROUNDS",
     "TuneResult",
-    "auto_tune",
-    "class_weight",
+    "tune_fold",
     "default_params",
     "fixed_params",
     "study_name",

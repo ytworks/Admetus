@@ -88,6 +88,20 @@ def column_counts(matrix: sparse.csr_matrix) -> np.ndarray:
     return np.diff(binary.indptr).astype(np.int64)
 
 
+def identity_basis(n_raw: int) -> ColumnBasis:
+    """Every column, kept.
+
+    The pruning this replaces dropped columns by how many training molecules set
+    them, two-sided, which is not something the reference implementation does: it
+    hands LightGBM the whole feature vector. The band was also the only remaining
+    size-dependent choice in the pipeline.
+
+    The basis type stays, because a bundle has to record which columns its boosters
+    were trained against and refuse a mismatch. It is simply the whole space now.
+    """
+    return ColumnBasis(kept=np.arange(n_raw, dtype=np.int32), n_raw=n_raw)
+
+
 def fit_basis(
     matrix: sparse.csr_matrix,
     band: PrevalenceRange,
@@ -187,4 +201,5 @@ def project(matrix: sparse.csr_matrix, col_map: np.ndarray, n_cols: int) -> spar
     return sparse.csr_matrix((data, indices, indptr), shape=(source.shape[0], n_cols))
 
 
-__all__ = ["ColumnBasis", "apply_basis", "column_counts", "fit_basis", "project"]
+__all__ = [
+    "identity_basis","ColumnBasis", "apply_basis", "column_counts", "fit_basis", "project"]

@@ -66,17 +66,6 @@ def test_the_two_herg_curations_declare_each_other():
     assert "herg" in get_endpoint("herg_karim").correlated_with
 
 
-def test_solubility_keeps_salts():
-    """Aqueous solubility is measured on the salt, so the fragment step is omitted."""
-    assert "largest_fragment" not in get_endpoint("solubility").standardize
-    assert "largest_fragment" in get_endpoint("dili").standardize
-
-
-def test_bounded_targets_declare_their_range():
-    assert get_endpoint("ppbr").output_range == (0.0, 100.0)
-    assert get_endpoint("vdss").output_range == (0.0, None)
-
-
 def test_species_filter_only_where_the_file_has_one():
     with_filter = [e.key for e in all_endpoints() if e.species_filter]
     assert with_filter == ["ppbr"]
@@ -93,14 +82,6 @@ def test_every_endpoint_gets_the_same_feature_space():
     # And the row count no longer changes the answer.
     small, large = get_endpoint("carcinogens"), get_endpoint("herg_karim")
     assert small.featurizer_spec(220).feature_set == large.featurizer_spec(13_445).feature_set
-
-def test_featurizer_spec_carries_the_endpoint_pipeline():
-    spec = get_endpoint("solubility").featurizer_spec(9982)
-    assert spec.standardize == ("cleanup", "uncharge")
-    assert get_endpoint("dili").featurizer_spec(5000).standardize == (
-        "cleanup", "largest_fragment", "uncharge",
-    )
-
 
 def test_prevalence_band_is_two_sided_and_tightens_with_size():
     small = prevalence_range(300)
@@ -135,7 +116,9 @@ def test_json_description_is_complete():
                   "low_confidence", "correlated_with", "in_official_group"):
         assert field in payload
     assert payload["direction"] == "higher_is_better"
-    assert payload["transform"] == "log10_safe"
+    # No endpoint declares a transform any more; the field stays in the description
+    # so a caller can see that none is applied.
+    assert payload["transform"] is None
 
 
 def test_unknown_endpoint_names_the_remedy():
@@ -188,3 +171,18 @@ def test_doctor_reports_cores_when_a_level_is_missing():
             cmd_doctor._cpu_status = original
         assert "internal error" not in result.output, (cpu, result.output)
         assert "cpu " in result.output
+
+
+def test_no_endpoint_declares_a_transform_a_range_or_a_pipeline():
+    """Three per-endpoint knobs the reference implementation does not have.
+
+    It trains on the label it was given, clamps nothing, and fingerprints the parsed
+    molecule without standardizing it. A log10 transform, an output range and a
+    standardization pipeline were all additions, and each of them changed either the
+    target or the molecule the model sees.
+    """
+    for endpoint in all_endpoints():
+        assert endpoint.transform is None, endpoint.key
+        assert endpoint.output_range is None, endpoint.key
+        assert endpoint.standardize == (), endpoint.key
+        assert endpoint.featurizer_spec().standardize == (), endpoint.key

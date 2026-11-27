@@ -47,8 +47,16 @@ def test_a_different_seed_gives_a_different_holdout():
     assert not np.array_equal(a.test, b.test)
 
 
-def test_it_matches_sklearn_for_the_same_seed():
-    """The partition has to be the one the reference implementation produces."""
+def test_it_matches_sklearn_for_the_same_seed_order_included():
+    """The partition and its order both have to match the reference implementation.
+
+    The order is not cosmetic. `cv_folds` cuts contiguous blocks, so whatever order
+    reaches it decides fold membership, and these dataset files are sorted by label.
+    Sorting the indices back into file order gave `bioavailability` a validation fold
+    of 171 rows that were 100% positive: `binary_error` was minimal at iteration 1,
+    the model stopped there, and held-out AUROC fell to 0.5121 from the reference's
+    0.6867.
+    """
     from sklearn.model_selection import train_test_split
 
     expected_train, expected_test = train_test_split(
@@ -56,8 +64,10 @@ def test_it_matches_sklearn_for_the_same_seed():
     )
     split = random_holdout(280, test_fraction=0.2, seed=0)
 
-    assert np.array_equal(split.test, np.sort(expected_test))
-    assert np.array_equal(split.train, np.sort(expected_train))
+    assert np.array_equal(split.test, expected_test)
+    assert np.array_equal(split.train, expected_train)
+    # Which is to say: shuffled, not sorted.
+    assert not np.array_equal(split.train, np.sort(split.train))
 
 
 @pytest.mark.parametrize("fraction", [0.0, 1.0, -0.1, 1.5])

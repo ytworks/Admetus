@@ -20,10 +20,7 @@
 #   task                classification | regression
 #   metric              Primary metric. Chosen to match the official benchmark.
 #   unit                Unit of the label, as published. Reported to callers.
-#   transform           Label transform applied before training: log10 | log10_safe
-#   output_range        Clamp predictions to this closed interval.
 #   species_filter      Keep only rows whose Species column equals this.
-#   standardize         Override the default standardization pipeline.
 #   correlated_with     Other endpoints whose predictions are not independent.
 #   expected_rows       Row count after normalization. Verified at fetch time.
 #   notes               Why anything unusual above is the way it is.
@@ -33,9 +30,6 @@
 # feature space does not: every endpoint gets the same one.
 
 schema_version: 1
-
-defaults:
-  standardize: [cleanup, largest_fragment, uncharge]
 
 endpoints:
 
@@ -48,7 +42,7 @@ endpoints:
     metric: mae
     unit: log cm/s
     in_official_group: true
-    expected_rows: 906
+    expected_rows: 910
     description: Caco-2 cell effective permeability.
 
   - key: pampa
@@ -59,7 +53,7 @@ endpoints:
     metric: auroc
     unit: binary
     in_official_group: false
-    expected_rows: 2034
+    expected_rows: 2035
     description: Parallel artificial membrane permeability, high vs low.
 
   - key: hia
@@ -81,7 +75,7 @@ endpoints:
     metric: auroc
     unit: binary
     in_official_group: true
-    expected_rows: 1212
+    expected_rows: 1219
     description: P-glycoprotein inhibition.
 
   - key: bioavailability
@@ -116,7 +110,6 @@ endpoints:
     unit: log mol/L
     in_official_group: true
     expected_rows: 9982
-    standardize: [cleanup, uncharge]
     notes: >-
       largest_fragment is omitted deliberately. Aqueous solubility is measured on
       the salt, so replacing a salt with its largest organic fragment would train
@@ -131,7 +124,7 @@ endpoints:
     metric: auroc
     unit: binary
     in_official_group: true
-    expected_rows: 1965
+    expected_rows: 2039
     description: Blood-brain barrier penetration.
 
   - key: ppbr
@@ -141,7 +134,6 @@ endpoints:
     task: regression
     metric: mae
     unit: percent bound
-    output_range: [0.0, 100.0]
     species_filter: Homo sapiens
     in_official_group: true
     expected_rows: 1614
@@ -158,10 +150,8 @@ endpoints:
     task: regression
     metric: spearman
     unit: L/kg
-    transform: log10_safe
-    output_range: [0.0, null]
     in_official_group: true
-    expected_rows: 1111
+    expected_rows: 1130
     notes: >-
       Spans roughly 0.01 to 700 L/kg. Trained in log10 space so the loss is not
       dominated by a handful of high-volume compounds. Spearman is rank-based, so
@@ -237,7 +227,7 @@ endpoints:
     metric: auprc
     unit: binary
     in_official_group: true
-    expected_rows: 666
+    expected_rows: 669
     description: CYP2C9 substrate.
 
   - key: cyp2d6_substrate
@@ -248,7 +238,7 @@ endpoints:
     metric: auprc
     unit: binary
     in_official_group: true
-    expected_rows: 663
+    expected_rows: 667
     description: CYP2D6 substrate.
 
   - key: cyp3a4_substrate
@@ -259,7 +249,7 @@ endpoints:
     metric: auroc
     unit: binary
     in_official_group: true
-    expected_rows: 667
+    expected_rows: 670
     description: CYP3A4 substrate.
 
   # ----------------------------------------------------------------- excretion
@@ -270,10 +260,8 @@ endpoints:
     task: regression
     metric: spearman
     unit: hours
-    transform: log10_safe
-    output_range: [0.0, null]
     in_official_group: true
-    expected_rows: 665
+    expected_rows: 667
     notes: >-
       Spans roughly 0.065 to 1200 hours. Trained in log10 space for the same
       reason as vdss.
@@ -286,10 +274,8 @@ endpoints:
     task: regression
     metric: spearman
     unit: uL/min/10^6 cells
-    transform: log10_safe
-    output_range: [0.0, null]
     in_official_group: true
-    expected_rows: 1020
+    expected_rows: 1213
     notes: >-
       Contains values at or below the limit of quantification, so the transform
       floors at half the smallest positive value rather than taking log10(0).
@@ -302,8 +288,6 @@ endpoints:
     task: regression
     metric: spearman
     unit: mL/min/g
-    transform: log10_safe
-    output_range: [0.0, null]
     in_official_group: true
     expected_rows: 1102
     notes: Same limit-of-quantification handling as clearance_hepatocyte.
@@ -318,7 +302,7 @@ endpoints:
     metric: mae
     unit: -log10(mol/kg)
     in_official_group: true
-    expected_rows: 7342
+    expected_rows: 7385
     notes: >-
       Already on a log scale, so no transform. Contains inorganics, metals and
       mixtures that RDKit cannot featurize; those rows are reported, not replaced.
@@ -332,7 +316,7 @@ endpoints:
     metric: auroc
     unit: binary
     in_official_group: true
-    expected_rows: 645
+    expected_rows: 655
     correlated_with: [herg_karim]
     notes: >-
       A different curation of the same assay as herg_karim, with substantial
@@ -360,7 +344,7 @@ endpoints:
     metric: auroc
     unit: binary
     in_official_group: true
-    expected_rows: 7255
+    expected_rows: 7278
     description: Ames mutagenicity.
 
   - key: dili
@@ -382,7 +366,7 @@ endpoints:
     metric: auprc
     unit: binary
     in_official_group: false
-    expected_rows: 276
+    expected_rows: 280
     description: Carcinogenicity.
 
   - key: skin_reaction

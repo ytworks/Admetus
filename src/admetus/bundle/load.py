@@ -34,7 +34,7 @@ from admetus.bundle.save import (
 from admetus.chem.spec import FeaturizerSpec
 from admetus.errors import ModelError, SpecMismatchError
 from admetus.logging import get_logger
-from admetus.train import calibrate, transforms
+from admetus.train import transforms
 from admetus.train.prune import ColumnBasis
 
 log = get_logger("bundle.load")
@@ -51,10 +51,7 @@ class LoadedModel:
         basis: The retained columns.
         boosters: The fold ensemble.
         transform: Label transform, for mapping output back to the published scale.
-        calibrator: Probability calibration, classification only.
         unit: Unit of the published label.
-        output_range: Range predictions are clamped to.
-        decision_threshold: Recommended operating point, classification only.
         metadata: The whole bundle record.
     """
 
@@ -64,10 +61,7 @@ class LoadedModel:
     basis: ColumnBasis
     boosters: list[Any]
     transform: transforms.Transform
-    calibrator: calibrate.Calibrator | None
     unit: str
-    output_range: tuple[float | None, float | None] | None
-    decision_threshold: float | None
     metadata: dict[str, Any]
 
     @property
@@ -292,7 +286,6 @@ def load(directory: str, check_fingerprint: bool = True) -> LoadedModel:
     basis = ColumnBasis(kept=kept, n_raw=int(featurizer["n_raw_features"]))
 
     endpoint = meta["endpoint"]
-    output_range = endpoint.get("output_range")
     return LoadedModel(
         key=endpoint["key"],
         task=endpoint["task"],
@@ -300,10 +293,7 @@ def load(directory: str, check_fingerprint: bool = True) -> LoadedModel:
         basis=basis,
         boosters=boosters,
         transform=transforms.from_dict(meta.get("transform")),
-        calibrator=calibrate.from_dict(meta.get("calibrator")),
         unit=endpoint.get("unit", ""),
-        output_range=tuple(output_range) if output_range else None,
-        decision_threshold=meta.get("decision_threshold"),
         metadata=meta,
     )
 
