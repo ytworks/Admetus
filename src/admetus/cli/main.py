@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import click
 
+from admetus.cli.cmd_benchmark import benchmark_group
 from admetus.cli.cmd_data import data_group
 from admetus.cli.cmd_doctor import doctor_command
 from admetus.cli.cmd_endpoints import endpoints_command
@@ -47,6 +48,7 @@ cli.add_command(endpoints_command)
 cli.add_command(data_group)
 cli.add_command(train_command)
 cli.add_command(evaluate_command)
+cli.add_command(benchmark_group)
 cli.add_command(predict_command)
 cli.add_command(models_group)
 

@@ -16,6 +16,7 @@ from admetus.bundle import load as bundle_load
 from admetus.bundle import save as bundle_save
 from admetus.data.loader import Dataset
 from admetus.data.registry import Endpoint
+from admetus.errors import InputDataError
 from admetus.predict import csvio, runner
 from admetus.train.trainer import train_endpoint
 
@@ -272,3 +273,47 @@ def test_a_colliding_column_name_is_renamed(trained, tmp_path):
     )
     assert "fixture_admetus" in report.added_columns
     assert destination.read_text(encoding="utf-8").splitlines()[1].startswith("1,CCO,existing,")
+
+
+def test_a_given_holdout_replaces_the_scaffold_split():
+    """The official protocol's path: the published test rows are the ones scored.
+
+    Checks what the protocol depends on -- that the rows handed in as the holdout are
+    exactly the rows measured, and that the record says the split was given rather
+    than derived, so a number from this path cannot be mistaken for a scaffold one.
+    """
+    dataset = synthetic_dataset()
+    holdout = np.zeros(len(dataset), dtype=bool)
+    holdout[-120:] = True
+
+    model = train_endpoint(
+        synthetic_endpoint(), dataset, folds=3, seed=0, tune=False,
+        num_threads=2, bootstrap_resamples=0, feature_set="morgan", holdout=holdout,
+    )
+
+    assert model.provenance["split"] == "given (published benchmark split)"
+    assert model.provenance["test_fraction"] is None
+    # The scored rows are the holdout's, less any molecule the featurizer could not
+    # read -- which drops out of whichever side it was on rather than moving sides.
+    n_failed = model.provenance["n_featurize_failures"]
+    assert model.provenance["n_test"] == model.test_metrics["n_test"]
+    assert 120 - n_failed <= model.provenance["n_test"] <= 120
+    assert model.provenance["n_train"] <= len(dataset) - model.provenance["n_test"]
+
+
+def test_a_holdout_of_the_wrong_shape_is_refused():
+    dataset = synthetic_dataset()
+    with pytest.raises(InputDataError, match="holdout mask has shape"):
+        train_endpoint(
+            synthetic_endpoint(), dataset, folds=3, seed=0, tune=False,
+            feature_set="morgan", holdout=np.zeros(len(dataset) - 1, dtype=bool),
+        )
+
+
+def test_a_holdout_that_leaves_nothing_to_measure_is_refused():
+    dataset = synthetic_dataset()
+    with pytest.raises(InputDataError, match="nothing can be measured"):
+        train_endpoint(
+            synthetic_endpoint(), dataset, folds=3, seed=0, tune=False,
+            feature_set="morgan", holdout=np.zeros(len(dataset), dtype=bool),
+        )
