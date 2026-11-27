@@ -211,3 +211,38 @@ def test_missing_and_empty_inputs_are_refused(tmp_path):
     empty.write_text("", encoding="utf-8")
     with pytest.raises(InputDataError, match="empty"):
         csvio.sniff(empty)
+
+
+def test_feature_spaces_are_grouped_in_the_order_they_first_appear():
+    """Prediction featurizes once per feature space, and the groups drive that.
+
+    The positions index the caller's model list, not the group, because the output
+    column order follows the endpoints the caller asked for and two endpoints of one
+    space need not be adjacent in it. The 29 endpoints span three spaces, and the
+    interleaving below is the real registry order in miniature.
+    """
+    from admetus.chem.spec import get_spec
+    from admetus.predict.runner import spec_groups
+
+    class Fake:
+        def __init__(self, name):
+            self.spec = get_spec(name)
+
+    models = [Fake("morgan_p23"), Fake("morgan_p2"), Fake("morgan_p23"), Fake("morgan")]
+    groups = spec_groups(models)
+
+    assert [g.spec.feature_set for g in groups] == ["morgan_p23", "morgan_p2", "morgan"]
+    assert [g.positions for g in groups] == [(0, 2), (1,), (3,)]
+
+
+def test_one_feature_space_gives_one_group():
+    from admetus.chem.spec import get_spec
+    from admetus.predict.runner import spec_groups
+
+    class Fake:
+        def __init__(self, name):
+            self.spec = get_spec(name)
+
+    groups = spec_groups([Fake("morgan_p2"), Fake("morgan_p2")])
+    assert len(groups) == 1
+    assert groups[0].positions == (0, 1)

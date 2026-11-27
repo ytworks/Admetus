@@ -163,3 +163,34 @@ def test_build_csr_on_empty_rows():
     matrix = build_csr([np.empty(0, dtype=np.int32)], 100)
     assert matrix.shape == (1, 100)
     assert matrix.nnz == 0
+
+
+def test_two_in_process_featurizers_do_not_share_one_spec():
+    """A run spanning all 29 endpoints needs one featurizer per feature space.
+
+    The in-process path keeps its spec in a module global, because a spawned worker
+    cannot inherit it. That made the global belong to whichever featurizer was
+    prepared last, so the other one silently featurized into the wrong column
+    space: indices up to 2,372 built into a 2,048-column matrix, which scipy's
+    column indexing crashes the interpreter on rather than refusing.
+    """
+    from admetus.chem.parallel import Featurizer
+    from admetus.chem.spec import get_spec
+
+    narrow, wide = get_spec("morgan"), get_spec("morgan_p2")
+    smiles = ["CC(=O)Oc1ccccc1C(=O)O", "CN1C=NC2=C1C(=O)N(C)C(=O)N2C"]
+
+    with Featurizer(narrow, jobs=1) as a, Featurizer(wide, jobs=1) as b:
+        # Interleaved on purpose: the second __enter__ used to leave `a` using b's spec.
+        first = a.run(smiles)
+        second = b.run(smiles)
+        again = a.run(smiles)
+
+    for result, spec in ((first, narrow), (second, wide), (again, narrow)):
+        for indices in result.indices:
+            assert indices is not None
+            assert indices.max() < spec.n_features, (spec.feature_set, int(indices.max()))
+
+    # And the two spaces really do differ, or the test would pass trivially.
+    assert narrow.n_features != wide.n_features
+    assert [i.size for i in first.indices] != [i.size for i in second.indices]

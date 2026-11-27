@@ -181,6 +181,18 @@ class Featurizer:
 
         batches = make_batches(smiles, self.batch_size)
         if self._pool is None:
+            # The in-process path keeps its spec in a module global, which the
+            # worker pool path needs because a spawned process cannot inherit it.
+            # That makes the global shared by every in-process featurizer alive at
+            # once, so two of them -- one per feature space, which is what a run
+            # spanning all 29 endpoints needs -- would each use whichever spec was
+            # prepared last, and silently featurize into the wrong column space.
+            # Re-preparing here makes the spec this object's own rather than the
+            # most recent one's, and it is nearly free: the factories it builds are
+            # cached in pharm2d, which holds more of them than there are feature
+            # spaces, so alternating between two specs per chunk hits the cache.
+            if _WORKER_SPEC is not self.spec:
+                _init_worker(self.spec)
             results = (_featurize_batch(b) for b in batches)
         else:
             # Unordered, because an efficiency-core task can take 2.5x as long and

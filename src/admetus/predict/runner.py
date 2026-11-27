@@ -2,9 +2,14 @@
 
 The shape of the work, and why:
 
-* **Featurize each distinct molecule once and serve every endpoint from it.** The
-  feature vector does not depend on the endpoint, so computing it per endpoint
-  would repeat the expensive step 29 times.
+* **Featurize each distinct molecule once per feature space and serve every
+  endpoint from it.** A feature vector does not depend on the endpoint, so
+  computing it per endpoint would repeat the expensive step 29 times. It does
+  depend on the feature space, and the 29 endpoints do not all share one: the
+  feature set is chosen per endpoint by measurement, so a run spanning all of them
+  featurizes each chunk once per distinct space -- three times today. The extra
+  passes are nearly free next to the first, because the cost is the 3-point
+  pharmacophore block and the narrower spaces do not have it.
 * **Deduplicate within a chunk, plus a bounded memo across chunks.** A dictionary
   covering a ten-million-row file would need gigabytes; a chunk-local map plus a
   capped recent-molecules cache is bounded and catches the repeats that matter.
@@ -16,6 +21,7 @@ The shape of the work, and why:
 
 from __future__ import annotations
 
+import contextlib
 import sys
 import time
 from collections import OrderedDict
@@ -121,6 +127,34 @@ def _format(value: float, precision: int) -> str:
     return f"{value:.{precision}g}"
 
 
+@dataclass(frozen=True)
+class SpecGroup:
+    """Endpoints that share one feature space, and where their columns go.
+
+    ``positions`` indexes into the caller's ``models`` list rather than into the
+    group, because the output column order follows the endpoints the caller asked
+    for and two endpoints of the same group need not be adjacent in it.
+    """
+
+    spec: Any
+    positions: tuple[int, ...]
+
+
+def spec_groups(models: list[LoadedModel]) -> list[SpecGroup]:
+    """Group models by feature space, in the order the spaces first appear."""
+    order: list[str] = []
+    found: dict[str, list[int]] = {}
+    specs: dict[str, Any] = {}
+    for position, model in enumerate(models):
+        digest = model.spec.spec_sha256
+        if digest not in found:
+            order.append(digest)
+            found[digest] = []
+            specs[digest] = model.spec
+        found[digest].append(position)
+    return [SpecGroup(spec=specs[d], positions=tuple(found[d])) for d in order]
+
+
 @dataclass
 class EndpointOutput:
     """One endpoint's columns for a chunk of distinct molecules."""
@@ -207,16 +241,14 @@ def run(
     started = time.time()
     report = Report()
 
-    specs = {m.spec.spec_sha256 for m in models}
-    if len(specs) != 1:
-        groups = {}
-        for m in models:
-            groups.setdefault(m.spec.feature_set, []).append(m.key)
-        raise InputDataError(
-            "the selected endpoints were trained on different feature spaces, so they cannot "
-            f"share one featurization pass: {groups}. Predict them in separate runs."
+    groups = spec_groups(models)
+    if len(groups) > 1:
+        log.info(
+            "%d feature space(s) among the selected endpoints (%s); each chunk is featurized "
+            "once per space",
+            len(groups),
+            ", ".join(f"{g.spec.feature_set}x{len(g.positions)}" for g in groups),
         )
-    spec = models[0].spec
 
     if source is None:
         raise InputDataError("reading from standard input is not supported yet; pass -i PATH")
@@ -250,10 +282,14 @@ def run(
     t_featurize = 0.0
     t_predict = 0.0
 
-    with (
-        csvio.Appender(destination, dialect, stdout=sys.stdout if destination is None else None) as out,
-        Featurizer(spec, jobs=jobs, batch_size=options.batch_size) as featurizer,
-    ):
+    with contextlib.ExitStack() as stack:
+        out = stack.enter_context(
+            csvio.Appender(destination, dialect, stdout=sys.stdout if destination is None else None)
+        )
+        featurizers = [
+            stack.enter_context(Featurizer(group.spec, jobs=jobs, batch_size=options.batch_size))
+            for group in groups
+        ]
         out.write(header, resolved)
 
         for chunk in _chunks(records, options.chunk_size):
@@ -276,52 +312,76 @@ def run(
             report.n_unique_raw += len(pending)
             distinct = list(pending)
 
-            t0 = time.time()
-            featurized = featurizer.run(distinct) if distinct else None
-            t_featurize += time.time() - t0
+            # One slot per endpoint per molecule. A molecule can succeed in one
+            # feature space and fail in another, because the standardization
+            # pipeline is part of the space -- the endpoints whose label describes
+            # a salt keep it, and the rest reduce to the largest fragment. So the
+            # slots are filled per space and the empty ones stay empty rather than
+            # taking a value computed for a different molecule.
+            slots: dict[str, list[list[str] | None]] = {
+                text: [None] * len(models) for text in distinct
+            }
+            reasons_for: dict[str, list[str]] = {}
 
-            rows: list[np.ndarray] = []
-            keys: list[str] = []
-            failed: dict[str, str] = {}
-            if featurized is not None:
-                for offset, text in enumerate(distinct):
-                    indices = featurized.indices[offset]
-                    if indices is None:
-                        failed[text] = featurized.reasons[offset] or "unknown failure"
-                        continue
-                    rows.append(indices)
-                    keys.append(text)
-                    if featurized.changed[offset]:
-                        report.n_standardization_changed += 1
+            for group_index, (group, featurizer) in enumerate(zip(groups, featurizers)):
+                spec = group.spec
+                t0 = time.time()
+                featurized = featurizer.run(distinct) if distinct else None
+                t_featurize += time.time() - t0
 
-            report.n_unique_canonical += len(keys)
-            report.n_featurized += len(keys)
+                rows: list[np.ndarray] = []
+                keys: list[str] = []
+                if featurized is not None:
+                    for offset, text in enumerate(distinct):
+                        indices = featurized.indices[offset]
+                        if indices is None:
+                            reasons_for.setdefault(text, []).append(
+                                featurized.reasons[offset] or "unknown failure"
+                            )
+                            continue
+                        rows.append(indices)
+                        keys.append(text)
+                        # Counted once per molecule, from the first space, so the
+                        # figure stays a molecule count rather than a pass count.
+                        if featurized.changed[offset] and group_index == 0:
+                            report.n_standardization_changed += 1
 
-            if rows:
+                if not rows:
+                    continue
+
                 t0 = time.time()
                 matrix = build_csr(rows, spec.n_features)
                 packed = popcount = None
-                if options.applicability_domain and any(m.reference is not None for m in models):
+                if options.applicability_domain and any(
+                    models[p].reference is not None for p in group.positions
+                ):
                     packed, popcount = pack_bits(
                         [r[r < spec.morgan_bits] for r in rows], spec.morgan_bits
                     )
-                outputs = []
-                for index, model in enumerate(models):
-                    produced = predict_block(model, matrix, packed, popcount, options)
-                    outputs.append(produced)
-                    endpoint_stats[index]["n_predicted"] += produced.n_predicted
-                    endpoint_stats[index]["n_in_domain"] += produced.n_in_domain
+                for position in group.positions:
+                    produced = predict_block(models[position], matrix, packed, popcount, options)
+                    endpoint_stats[position]["n_predicted"] += produced.n_predicted
+                    endpoint_stats[position]["n_in_domain"] += produced.n_in_domain
+                    for offset, text in enumerate(keys):
+                        slots[text][position] = produced.values[offset]
                 t_predict += time.time() - t0
 
-                for offset, text in enumerate(keys):
-                    cells: list[str] = []
-                    for produced in outputs:
-                        cells.extend(produced.values[offset])
-                    memo[text] = (cells, None)
-                    memo.move_to_end(text)
-
-            for text, reason in failed.items():
-                memo[text] = (list(blank), reason)
+            for text in distinct:
+                filled = slots[text]
+                # Distinct reasons in the order they were found: one line per row,
+                # however many spaces the molecule failed in.
+                reason = "; ".join(dict.fromkeys(reasons_for.get(text, []))) or None
+                if all(cells is None for cells in filled):
+                    memo[text] = (list(blank), reason or "unknown failure")
+                else:
+                    assembled: list[str] = []
+                    for position, cells in enumerate(filled):
+                        assembled.extend(
+                            cells if cells is not None else [EMPTY] * len(per_model[position])
+                        )
+                    memo[text] = (assembled, reason)
+                    report.n_unique_canonical += 1
+                    report.n_featurized += 1
                 memo.move_to_end(text)
 
             while len(memo) > options.memo_size:
@@ -378,7 +438,9 @@ __all__ = [
     "EndpointOutput",
     "Options",
     "Report",
+    "SpecGroup",
     "column_names",
     "predict_block",
     "run",
+    "spec_groups",
 ]

@@ -317,3 +317,50 @@ def test_a_holdout_that_leaves_nothing_to_measure_is_refused():
             synthetic_endpoint(), dataset, folds=3, seed=0, tune=False,
             feature_set="morgan", holdout=np.zeros(len(dataset), dtype=bool),
         )
+
+
+@pytest.fixture(scope="module")
+def trained_other_space(tmp_path_factory):
+    """A second model on a different feature space, for the mixed-space path."""
+    directory = tmp_path_factory.mktemp("models_p2")
+    model = train_endpoint(
+        synthetic_endpoint(), synthetic_dataset(), folds=3, seed=0, tune=False,
+        num_threads=2, bootstrap_resamples=50, feature_set="morgan_p2",
+    )
+    return bundle_save.save(model, directory)
+
+
+def test_endpoints_on_different_feature_spaces_predict_in_one_run(
+    trained, trained_other_space, tmp_path
+):
+    """The 29 endpoints do not share one feature space, so one run must span several.
+
+    The feature set is chosen per endpoint by measurement, which left the registry
+    with three spaces. Refusing a mixed selection would mean no single run could fill
+    in every column, and merging three CSVs by hand is exactly what the byte-
+    preserving contract exists to avoid.
+    """
+    _, _, morgan_path = trained
+    source = tmp_path / "in.csv"
+    source.write_bytes(TRICKY.encode("utf-8"))
+    destination = tmp_path / "out.csv"
+
+    bundle_load.load.cache_clear()
+    models = [bundle_load.load(str(morgan_path)), bundle_load.load(str(trained_other_space))]
+    assert len({m.spec.spec_sha256 for m in models}) == 2
+
+    report = runner.run(source, destination, models, runner.Options(jobs=1))
+
+    # Both endpoints contributed their columns, in the order they were asked for.
+    assert report.added_columns.count("fixture") == 1
+    assert "fixture_admetus" in report.added_columns
+    # The molecule that cannot be parsed still fails in both spaces, once.
+    assert report.n_failed == 1
+    assert report.n_featurized == 3
+
+    header = next(csvio.read_records(destination, csvio.sniff(destination))).fields
+    # The byte-order mark survives, because the passthrough is of bytes.
+    assert header[:4] == ["\ufeffcompound_id", "smiles", "project", "note"]
+    body = destination.read_bytes()
+    assert b"multi\nline note" in body
+    assert body.count(b"\r\n") >= 4
