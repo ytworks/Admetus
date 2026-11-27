@@ -79,6 +79,24 @@ single assay column from a wide file, and collapses duplicate structures.
 
 Each is fetched from `https://dataverse.harvard.edu/api/access/datafile/<id>`.
 
+## The published benchmark splits
+
+`admetus benchmark run` needs the benchmark group's own train/test partition, not
+one of ours, and that is published separately from the datasets: one archive,
+`admet_group.zip`, Dataverse file id 4426004, 1.4 MB, holding `train_val.csv` and
+`test.csv` for each of the 22 endpoints of the official group. `admetus benchmark
+fetch` downloads and unpacks it.
+
+Its SHA-256 is pinned in `src/admetus/data/benchmark.py`, on the same terms as the
+datasets: the publisher provides no checksum, so this is trust on first use with
+the decision frozen in version control. The seven endpoints outside the official
+group have no published split, and asking for one is refused rather than
+approximated.
+
+The archive's directory names are the dataset names lowercased, which is the
+registry's `tdc_name` folded down; the mapping is asserted for all 22 in
+`tests/unit/test_data_benchmark.py` rather than assumed.
+
 ## Normalization applied
 
 | Endpoint | What differs from the raw file |
