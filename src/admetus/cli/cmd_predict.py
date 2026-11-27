@@ -97,7 +97,10 @@ def predict_command(
     """
     setup_logging(ctx)
 
+    _report_written = False
+
     def body() -> None:
+        nonlocal _report_written
         directory = Path(models_dir or default_models_dir())
         present = set(available(directory))
         if not present:
@@ -181,6 +184,7 @@ def predict_command(
             # stale report from an earlier success stayed byte-for-byte in place and
             # read as this run's result.
             write_report(report_path, _failure_payload(exc, models, input_path))
+            _report_written = True
             raise
         finally:
             if temporary is not None:
@@ -192,13 +196,31 @@ def predict_command(
                     report_path,
                     _report_payload(report, models, input_path, out_path if not inline_json else None),
                 )
+                _report_written = True
 
         payload = _report_payload(report, models, input_path, out_path if not inline_json else None)
+        # Decided before either copy is emitted. stdout used to get `ok: true` while
+        # the report got `ok: false` for the same --strict run, because the status
+        # was settled after the JSON had already gone out.
+        strict_failure = bool(strict and report.n_failed)
+        if report.all_failed or strict_failure:
+            payload = {
+                **payload,
+                "ok": False,
+                "exit_code": EXIT_PARTIAL_FAILURE,
+                "failure": "every row failed" if report.all_failed else
+                           "--strict was given and at least one molecule failed",
+            }
+            # Written here, not after the JSON is assembled: the report carries the
+            # status and the counts, never the predictions themselves.
+            write_report(report_path, payload)
+            _report_written = True
         if inline_json:
             try:
                 payload["predictions"] = _rows_from_csv(json_csv, report, options)
             except AdmetusError as exc:
                 write_report(report_path, _failure_payload(exc, models, input_path))
+                _report_written = True
                 raise
             finally:
                 json_csv.unlink(missing_ok=True)
@@ -214,21 +236,24 @@ def predict_command(
         # be written as soon as the run finished, so a --strict failure, a refusal
         # during JSON conversion or a preflight error all left an `ok: true` report
         # behind -- in one case a stale one from an earlier success.
-        strict_failure = bool(strict and report.n_failed)
         if report.all_failed or strict_failure:
-            write_report(
-                report_path,
-                {
-                    **payload,
-                    "ok": False,
-                    "exit_code": EXIT_PARTIAL_FAILURE,
-                    "failure": "every row failed" if report.all_failed else
-                               "--strict was given and at least one molecule failed",
-                },
-            )
             raise SystemExit(EXIT_PARTIAL_FAILURE)
 
-    run_guarded(body, as_json=as_json)
+    def guarded() -> None:
+        """Run the body, and make sure a refusal reaches --report as well as stdout.
+
+        A missing input file or an empty model directory is found before any work, so
+        nothing used to be written: a report left from an earlier success stayed
+        byte-for-byte in place and read as this run's result.
+        """
+        try:
+            body()
+        except AdmetusError as exc:
+            if report_path is not None and not _report_written:
+                write_report(report_path, _failure_payload(exc, [], source))
+            raise
+
+    run_guarded(guarded, as_json=as_json)
 
 
 def _failure_payload(exc: Exception, models, source) -> dict:

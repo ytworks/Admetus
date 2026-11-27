@@ -103,7 +103,7 @@ class TuneResult:
             "best_cv_score": self.score,
             "n_trials": self.n_trials,
             "sampler_seed": self.seed,
-            "time_budget_seconds": self.time_budget,
+            "time_budget_seconds_per_fold": self.time_budget,
             # The tuner selects on the very rows it early-stops against, so this
             # score is optimistic as well as being a selection score. Reported
             # numbers come from the held-out 20%.
@@ -229,6 +229,7 @@ def _rebuild_fold(
     seed: int,
     time_budget: int | None,
     reason: str,
+    full_params: dict[str, Any] | None = None,
 ) -> TuneResult:
     """Fit one fold from the best parameters the study recorded.
 
@@ -242,8 +243,11 @@ def _rebuild_fold(
 
     completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
     merged = dict(params)
-    recorded = study.user_attrs.get(BEST_PARAMS_ATTR)
-    if recorded:
+    recorded = full_params or study.user_attrs.get(BEST_PARAMS_ATTR)
+    if full_params:
+        merged.update(full_params)
+        source = "the tuner's own accumulated best parameters"
+    elif recorded:
         merged.update(recorded)
         source = "the full parameters recorded for the study"
     elif completed:
@@ -387,9 +391,21 @@ def tune_fold(
             "the tuner failed after %d completed trial(s) (%s: %s); falling back to the best "
             "of those", len(completed), type(exc).__name__, exc,
         )
+        # The tuner accumulates each stage's winner in `best_params`, so ask it
+        # before falling back on the study. Reading the study instead loses every
+        # stage but the last: on DILI fold 1 the winning trial's own parameters are
+        # the two lambdas, while the tuner already held feature_fraction=0.6, and
+        # rebuilding without it took validation error from 14.96% to 17.32%.
+        from_tuner: dict[str, Any] | None = None
+        try:
+            if any(t.state == optuna.trial.TrialState.COMPLETE for t in study.trials):
+                from_tuner = dict(tuner.best_params)
+        except Exception:  # noqa: BLE001 - the tuner may be in any state here
+            from_tuner = None
         return _rebuild_fold(
             lgb, x_train, y_train, x_valid, y_valid, params, study, seed, time_budget,
             reason=f"the tuner raised {type(exc).__name__}: {exc}",
+            full_params=from_tuner,
         )
 
     best = dict(params)

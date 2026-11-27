@@ -155,6 +155,32 @@ def train_command(
     run_guarded(body, as_json=as_json)
 
 
+def _mcc_note(has_searched_mcc: bool, retrospective_only: bool) -> str | None:
+    """Explain which MCC a record carries, when it carries one at all.
+
+    ``mcc_at_best_threshold`` comes from searching the held-out labels for the cutoff
+    that maximizes it, so it is a retrospective diagnostic and not a score the model
+    can deliver. A record that also carries ``mcc`` has a number at an operating
+    point, and then both are described rather than only the searched one.
+    """
+    if not has_searched_mcc:
+        return None
+    searched = (
+        "mcc_at_best_threshold was obtained by searching the held-out labels for the "
+        "cutoff that maximizes it, so it is a retrospective diagnostic and not a "
+        "score this model can deliver"
+    )
+    if retrospective_only:
+        return (
+            f"{searched}: no operating threshold ships, because the reference "
+            "implementation reports probabilities and chooses none."
+        )
+    return (
+        f"{searched}. `mcc` is the score at the operating point the record ships, "
+        "and is the one to read."
+    )
+
+
 @click.command("evaluate")
 @endpoint_option
 @all_option
@@ -198,7 +224,12 @@ def evaluate_command(
             # `mcc_at_best_threshold` with no `mcc` is the normal state, not a stale
             # record. Telling the operator to retrain was wrong: another full run
             # produces exactly the same fields.
-            retrospective_mcc = "mcc_at_best_threshold" in metrics
+            # "Only" means there is nothing else: the flag reads the ABSENCE of an
+            # operating-point `mcc`, not the presence of the searched one. Keyed on
+            # presence alone, a record carrying both would have been described as
+            # having only the retrospective number.
+            has_searched_mcc = "mcc_at_best_threshold" in metrics
+            retrospective_mcc = has_searched_mcc and "mcc" not in metrics
             rows.append({
                 "endpoint": endpoint.key,
                 "metric": endpoint.metric,
@@ -206,12 +237,7 @@ def evaluate_command(
                 "primary": metrics.get("primary"),
                 "all_metrics": {k: v for k, v in metrics.items() if k != "primary"},
                 "mcc_is_retrospective_only": retrospective_mcc,
-                "mcc_note": (
-                    "mcc_at_best_threshold was obtained by searching the held-out labels for the "
-                    "cutoff that maximizes it, so it is a retrospective diagnostic and not a "
-                    "score this model can deliver: no operating threshold ships, because the "
-                    "reference implementation reports probabilities and chooses none."
-                ) if retrospective_mcc else None,
+                "mcc_note": _mcc_note(has_searched_mcc, retrospective_mcc),
                 "cv_score_biased": (meta.get("cross_validation") or {}).get("cv_score_biased", True),
                 "low_confidence": metrics.get("low_confidence"),
             })
@@ -250,6 +276,8 @@ def evaluate_command(
             notes = []
             if row["mcc_is_retrospective_only"]:
                 notes.append("MCC retrospective (threshold picked on the test labels)")
+            elif row["mcc_note"]:
+                notes.append("MCC at the shipped operating point, plus a retrospective one")
             if row["low_confidence"]:
                 notes.append("small dataset")
             if not row["in_official_group"]:

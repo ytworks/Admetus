@@ -54,8 +54,10 @@ byte for byte as it found them.
 Each endpoint is trained on its own, because the datasets do not share compounds, units or
 assays.
 
-1. **Standardize, then split.** SMILES are cleaned, salts removed and charges neutralized before
-   splitting, so two rows that collapse to the same molecule cannot land on opposite sides.
+1. **Parse the published rows as they are.** The SMILES is handed to RDKit and nothing else is
+   done to it: no salt stripping, no charge neutralization, no deduplication. Two rows that
+   describe the same molecule therefore stay two rows, and can land on opposite sides of the
+   split -- see the limitations below for how often that happens.
 2. **Featurize.** A Morgan fingerprint and a 2D pharmacophore signature, concatenated. The
    pharmacophore block enumerates sets of 2 or 3 pharmacophore features and the topological
    distance between each pair, so a bit means something like "a donor and an acceptor 4 to 5 bonds

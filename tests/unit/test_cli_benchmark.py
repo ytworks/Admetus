@@ -89,3 +89,47 @@ def test_the_report_says_whether_the_protocol_was_complete(runner, tmp_path):
     assert payload["tuned_per_seed"] is False
     # Three train_val rows cannot be trained on, so this fails -- loudly, per endpoint.
     assert payload["failed"] or payload["results"]
+
+
+def test_complete_protocol_is_what_ran_not_what_was_asked_for(runner, tmp_path):
+    """It used to compare the request with five, and never the outcome.
+
+    Asking for all five seeds and completing none of them reported
+    ``complete_protocol: true``, which is the one field a caller reads to decide
+    whether a number is comparable with the leaderboard.
+    """
+    write_split(tmp_path, get_endpoint("dili"))
+    result = runner.invoke(
+        cli,
+        [
+            "--quiet", "benchmark", "run", "--endpoint", "dili", "--seeds", "5",
+            "--no-tune", "--data-dir", str(tmp_path), "--json",
+        ],
+    )
+    payload = json.loads(result.stdout)
+    assert payload["seeds_requested"] == 5
+    assert payload["seeds"] == list(OFFICIAL_SEEDS)
+    # Three train_val rows cannot be trained on, so no seed completed. The endpoint
+    # is still in `results`, which is exactly the case the old check missed.
+    assert [r["n_seeds"] for r in payload["results"]] == [0]
+    assert payload["complete_protocol"] is False
+    assert payload["ok"] is False
+
+
+def test_the_budget_is_reported_per_fold_with_the_number_of_runs_it_buys(runner, tmp_path):
+    """`--time-budget` caps one fold, and every fold of every seed is tuned.
+
+    Reported as `time_budget_seconds`, it read as the cost of the whole endpoint; at
+    3 folds and 5 seeds the wall clock is fifteen times that.
+    """
+    write_split(tmp_path, get_endpoint("dili"))
+    result = runner.invoke(
+        cli,
+        [
+            "--quiet", "benchmark", "run", "--endpoint", "dili", "--seeds", "5",
+            "--time-budget", "30", "--data-dir", str(tmp_path), "--json",
+        ],
+    )
+    payload = json.loads(result.stdout)
+    assert payload["time_budget_seconds_per_fold"] == 30
+    assert payload["tuning_runs_per_endpoint"] == 3 * 5

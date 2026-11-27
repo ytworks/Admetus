@@ -33,9 +33,9 @@ TRICKY = (
 )
 
 
-def synthetic_endpoint() -> Endpoint:
+def synthetic_endpoint(key: str = "fixture") -> Endpoint:
     return Endpoint(
-        key="fixture",
+        key=key,
         tdc_name="Fixture",
         dataverse_id=1,
         task="classification",
@@ -106,6 +106,84 @@ def trained(tmp_path_factory):
     )
     path = bundle_save.save(model, directory)
     return endpoint, model, path
+
+
+
+@pytest.fixture(scope="module")
+def trained_under_a_registry_key(tmp_path_factory):
+    """The same tiny model, saved under a key the CLI's registry knows.
+
+    The CLI resolves ``--endpoint`` through the registry, so a bundle named after the
+    fixture cannot be reached from the command line at all. `dili` is a binary
+    classification endpoint, which is what the fixture trains.
+    """
+    directory = tmp_path_factory.mktemp("cli-models")
+    model = train_endpoint(
+        synthetic_endpoint("dili"), synthetic_dataset(), folds=3, seed=0, tune=False,
+        num_threads=2, bootstrap_resamples=50,
+    )
+    bundle_save.save(model, directory)
+    return directory
+
+
+def test_strict_says_the_same_thing_on_stdout_and_in_the_report(trained_under_a_registry_key, tmp_path):
+    """One status, decided before either copy is written.
+
+    The fixture input holds one unparseable molecule, so `--strict` has to refuse.
+    The exit code was 4 and the report said so, but the JSON document on standard
+    output had already been emitted with `ok: true`: the status was settled after it
+    went out. A caller reading stdout and a caller reading the report disagreed about
+    the same run.
+    """
+    from click.testing import CliRunner
+
+    from admetus.cli.main import cli
+
+    source = tmp_path / "in.csv"
+    source.write_bytes(TRICKY.encode("utf-8"))
+    report = tmp_path / "report.json"
+    bundle_load.load.cache_clear()
+
+    result = CliRunner().invoke(
+        cli,
+        ["predict", "--models-dir", str(trained_under_a_registry_key), "--endpoint", "dili",
+         "-i", str(source), "--strict", "--json", "--report", str(report)],
+    )
+
+    assert result.exit_code == 4, result.output
+    on_stdout = json.loads(result.output)
+    in_report = json.loads(report.read_text(encoding="utf-8"))
+    assert on_stdout["ok"] is False
+    assert in_report["ok"] is False
+    assert on_stdout["exit_code"] == in_report["exit_code"] == 4
+    # The report carries the status and the counts, not the predictions.
+    assert "predictions" in on_stdout
+    assert "predictions" not in in_report
+
+
+def test_a_run_that_succeeds_says_so_in_both_places(trained_under_a_registry_key, tmp_path):
+    """And without --strict the same input is a success with one reported failure."""
+    from click.testing import CliRunner
+
+    from admetus.cli.main import cli
+
+    source = tmp_path / "in.csv"
+    source.write_bytes(TRICKY.encode("utf-8"))
+    report = tmp_path / "report.json"
+    destination = tmp_path / "out.csv"
+    bundle_load.load.cache_clear()
+
+    result = CliRunner().invoke(
+        cli,
+        ["predict", "--models-dir", str(trained_under_a_registry_key), "--endpoint", "dili",
+         "-i", str(source), "-o", str(destination), "--json", "--report", str(report)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["ok"] is True
+    in_report = json.loads(report.read_text(encoding="utf-8"))
+    assert in_report["ok"] is True
+    assert in_report["molecules"]["n_failed"] == 1
 
 
 def test_training_produces_a_complete_bundle(trained):

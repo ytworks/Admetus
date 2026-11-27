@@ -195,7 +195,8 @@ def train_endpoint(
         for index, fold in enumerate(fold_sets):
             study = tuning.study_name(
                 endpoint.key, spec.feature_set, basis.n_cols, len(fold_sets), params,
-                seed=seed, fold_signature=f"{splits.fold_signature(fold_sets)}-{index}",
+                seed=seed,
+                fold_signature=f"{splits.fold_signature(fold_sets, train_rows)}-{index}",
             )
             tuned = tuning.tune_fold(
                 x_train[fold.train], y_train[fold.train],
@@ -232,7 +233,7 @@ def train_endpoint(
             "cv_score_biased": True,
             "n_trials": sum(r["n_trials"] for r in per_fold),
             "sampler_seed": seed,
-            "time_budget_seconds": time_budget,
+            "time_budget_seconds_per_fold": time_budget,
             "search_space_owner": "tuner",
             "feature_fraction_grid_floor": 0.4,
         }

@@ -118,3 +118,38 @@ def test_the_fold_report_omits_positives_for_regression():
     y = np.linspace(0.0, 1.0, 300)
     rows = fold_report(cv_folds(300, n_splits=3), y, "regression")
     assert all("n_valid_positive" not in row for row in rows)
+
+
+def test_the_fold_signature_pins_the_rows_not_the_positions():
+    """The same fold positions over different dataset rows are a different partition.
+
+    The signature hashed positions into the training array, which are 0..n-1 for every
+    run of the same size. Two endpoints with equal training-set sizes, or the same
+    endpoint under a different holdout, produced the identical signature -- so the
+    field could not be used to tell two partitions apart, which is its only job.
+    """
+    folds = cv_folds(300, n_splits=3)
+    first = np.arange(300)
+    shifted = np.arange(300) + 1000
+
+    assert fold_signature(folds, row_ids=first) == fold_signature(folds, row_ids=first)
+    assert fold_signature(folds, row_ids=first) != fold_signature(folds, row_ids=shifted)
+    # And omitting the row ids still describes the positions, as before.
+    assert fold_signature(folds) != fold_signature(folds, row_ids=shifted)
+
+
+def test_the_fold_signature_ignores_the_order_within_a_fold():
+    """Which rows are in a fold is the partition; their order inside it is not.
+
+    The rows are sorted before hashing, so a reshuffle that keeps every fold's
+    membership is the same partition and gets the same signature.
+    """
+    folds = cv_folds(300, n_splits=3)
+    rows = np.arange(300)
+    swapped = rows.copy()
+    # Positions 0 and 1 are both in the first fold, so this changes the order the
+    # rows arrive in without changing which fold any row belongs to.
+    swapped[[0, 1]] = swapped[[1, 0]]
+
+    assert folds[0].test[0] == 0 and folds[0].test[1] == 1
+    assert fold_signature(folds, row_ids=swapped) == fold_signature(folds, row_ids=rows)

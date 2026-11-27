@@ -134,17 +134,27 @@ def cv_folds(n_rows: int, n_splits: int = DEFAULT_FOLDS) -> list[Split]:
     ]
 
 
-def fold_signature(folds: list[Split]) -> str:
-    """A short digest of an actual fold partition.
+def fold_signature(folds: list[Split], row_ids: np.ndarray | None = None) -> str:
+    """A short digest of the compounds each fold actually validates on.
 
     Part of a tuning study's identity: trials are only comparable while they were
-    scored against the same validation rows, and a fold count alone does not say that.
+    scored against the same validation rows.
+
+    ``row_ids`` maps fold positions back to dataset rows and is what makes this
+    sound. Hashing the positions alone kept the signature stable when the rows under
+    them changed: once the official path began permuting its training rows per seed,
+    two runs with the same seed shared a signature while fold 0 shared only 51 of its
+    127 validation compounds, and the second run mixed nine old trials with eleven
+    new ones.
     """
     import hashlib
 
     digest = hashlib.blake2b(digest_size=6)
     for fold in folds:
-        digest.update(np.asarray(fold.test, dtype=np.int64).tobytes())
+        rows = np.asarray(fold.test, dtype=np.int64)
+        if row_ids is not None:
+            rows = np.sort(np.asarray(row_ids, dtype=np.int64)[rows])
+        digest.update(rows.tobytes())
         digest.update(b"|")
     return digest.hexdigest()
 

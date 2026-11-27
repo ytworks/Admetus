@@ -145,8 +145,10 @@ def run_command(
     leaderboard reports. Nothing is written to the model directory: this command
     measures the protocol, and the bundles that ship come from 'admetus train'.
 
-    Expect this to be expensive. Five seeds per endpoint means five tuning runs, so
-    --time-budget bounds each one and --no-tune skips tuning entirely.
+    Expect this to be expensive. --time-budget caps the tuner on ONE FOLD, and a
+    fold is tuned for every seed: at the default 3 folds and 5 seeds that is fifteen
+    tuning runs per endpoint, so the wall clock is fifteen times the budget, not
+    five. --no-tune skips tuning entirely.
     """
     setup_logging(ctx)
 
@@ -177,15 +179,21 @@ def run_command(
             if not as_json:
                 click.echo(result.describe())
 
+        # Reported, not requested. `complete_protocol` used to read the five seeds off
+        # the command line, so a run that asked for five and completed two still
+        # claimed the protocol was complete.
+        all_seeds_ran = bool(results) and all(r["n_seeds"] == len(bench.OFFICIAL_SEEDS) for r in results)
         payload = {
             "ok": not failed and all(r["n_seeds"] == len(chosen_seeds) for r in results),
             "n_comparable": sum(1 for r in results if r["comparable_with_leaderboard"]),
             "protocol": "official benchmark group: published train_val/test split per endpoint",
             "archive_sha256": bench.ARCHIVE_SHA256,
             "seeds": list(chosen_seeds),
-            "complete_protocol": len(chosen_seeds) == len(bench.OFFICIAL_SEEDS),
+            "seeds_requested": len(chosen_seeds),
+            "complete_protocol": not failed and all_seeds_ran,
             "tuned_per_seed": tune,
-            "time_budget_seconds": budget if tune else None,
+            "time_budget_seconds_per_fold": budget if tune else None,
+            "tuning_runs_per_endpoint": folds * len(chosen_seeds) if tune else 0,
             "n_endpoints": len(results),
             "results": results,
             "failed": failed,

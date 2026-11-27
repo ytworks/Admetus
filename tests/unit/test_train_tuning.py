@@ -1,8 +1,8 @@
 """The automatic tuner path.
 
 Tuning is delegated to Optuna's stepwise LightGBM tuner, so what is worth testing
-is the integration: that our sparse matrices and scaffold-grouped folds go
-through it, that the metric we align per endpoint survives, that the per-fold
+is the integration: that our sparse matrices and the folds over the training
+portion go through it, that the metric we align per endpoint survives, that the per-fold
 boosters come back, and that the study resumes.
 """
 
@@ -35,7 +35,7 @@ def toy(n_rows: int = 160, n_cols: int = 300, seed: int = 0, classification: boo
 
 
 def folds_of(n_rows: int, k: int = 3) -> list[Split]:
-    """Contiguous folds, standing in for the scaffold-grouped ones."""
+    """Contiguous folds, as ``KFold`` without shuffling cuts them."""
     bounds = np.array_split(np.arange(n_rows), k)
     return [
         Split(np.sort(np.setdiff1d(np.arange(n_rows), block)), np.sort(block)) for block in bounds
@@ -288,3 +288,66 @@ def test_a_resumed_study_still_yields_a_usable_booster(tmp_path):
     assert second.boosters[0].predict(matrix[:3]).shape == (3,)
     if second.tuner_failed:
         assert "full parameters recorded" in second.rebuilt_from
+
+
+def _rebuild(full_params, study_attr, trial_params):
+    """Rebuild one fold from a stand-in study, and report where it took its parameters."""
+    import optuna
+
+    matrix, y = toy()
+    fold = folds_of(matrix.shape[0])[0]
+    params = tuning.fixed_params("classification", "auroc", num_threads=2)
+
+    study = optuna.create_study(direction="minimize")
+    study.add_trial(
+        optuna.trial.create_trial(
+            params=dict(trial_params),
+            distributions={k: optuna.distributions.FloatDistribution(0.1, 1.0) for k in trial_params},
+            value=0.2,
+        )
+    )
+    if study_attr is not None:
+        study.set_user_attr(tuning.BEST_PARAMS_ATTR, dict(study_attr))
+
+    import lightgbm as lgb
+
+    return tuning._rebuild_fold(
+        lgb, matrix[fold.train], y[fold.train], matrix[fold.test], y[fold.test],
+        params, study, seed=0, time_budget=None, reason="a test",
+        full_params=full_params,
+    )
+
+
+def test_a_rebuild_prefers_the_tuner_s_own_accumulated_parameters():
+    """The tuner holds every stage's winner; the study and the trial hold less.
+
+    When LightGBMTuner raises partway through, `tuner.best_params` is still the only
+    place the whole winning set exists: the winning trial records just the stage it
+    varied, and the study attribute is written only on a successful run. Rebuilding
+    from the trial alone took DILI fold 1's validation error from 14.96% to 17.32%,
+    because `feature_fraction=0.6` -- fixed two stages earlier -- was dropped.
+    """
+    result = _rebuild(
+        full_params={"feature_fraction": 0.6, "bagging_fraction": 0.8},
+        study_attr={"feature_fraction": 0.9},
+        trial_params={"bagging_fraction": 0.8},
+    )
+    assert result.params["feature_fraction"] == 0.6
+    assert result.params["bagging_fraction"] == 0.8
+    assert "accumulated best parameters" in result.rebuilt_from
+    assert result.boosters
+
+
+def test_a_rebuild_falls_back_to_the_study_then_to_the_trial():
+    """And says which, because the three are not equally complete."""
+    from_study = _rebuild(
+        full_params=None,
+        study_attr={"feature_fraction": 0.9},
+        trial_params={"bagging_fraction": 0.8},
+    )
+    assert from_study.params["feature_fraction"] == 0.9
+    assert "recorded for the study" in from_study.rebuilt_from
+
+    from_trial = _rebuild(full_params=None, study_attr=None, trial_params={"bagging_fraction": 0.7})
+    assert from_trial.params["bagging_fraction"] == 0.7
+    assert "earlier stages' choices are lost" in from_trial.rebuilt_from
