@@ -40,12 +40,19 @@ its own run and the compounds scored are not the same:
 | Calibration + pruning + scaffold-grouped split | scaffold holdout, 55 rows | 0.249 |
 | Calibration removed, pruning and scaffold split kept | scaffold holdout, 55 rows | 0.751 |
 | Reference implementation followed: random holdout, no pruning, per-fold tuning | random seed-0 holdout, 56 rows | 0.885 |
+| The shipped `models-v0.1.0` bundle, same pipeline at a 240s-per-fold budget | random seed-0 holdout, 56 rows | 0.901 |
 | *The reference implementation's own figure* | *its own holdout, 56 rows* | *0.865* |
 
 The first two share an evaluation set and so can be compared with each other; the
-third cannot be subtracted from either. What the table supports is that the finished
-pipeline reaches the reference's figure, and that the calibrator alone cost half of
-ROC-AUC on the predictions it was applied to.
+third cannot be subtracted from either. The fourth is the bundle that ships, on the
+same evaluation set as the third and differing from it only in tuning budget -- which
+is also the reason the two are not the same number. The README quotes this endpoint's
+AUPRC, 0.8164, because AUPRC is its registered metric; ROC-AUC is used here only
+because it is what the earlier rows were measured in.
+
+What the table supports is that the finished pipeline reaches the reference's figure,
+and that the calibrator alone cost half of ROC-AUC on the predictions it was applied
+to.
 
 ### How a calibrator inverts a ranking
 
