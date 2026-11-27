@@ -85,10 +85,12 @@ pipeline that no longer exists.
 
 Measured, and still true after the simplification. `docs/benchmark.md` has the numbers.
 
-- **Featurization is fast enough.** 3.73 ms per molecule, 848 molecules per second on
-  nine workers, about two minutes per 100,000 unique molecules. An early estimate of
-  28 minutes was wrong by roughly 14 times, so the vendored fast pharmacophore path
-  that estimate justified was never written.
+- **Featurization is fast enough.** 2.93 ms per molecule, 1,375 molecules per second on
+  nine workers, about 1.2 minutes per 100,000 unique molecules. An early estimate of
+  28 minutes was wrong by more than 20 times, so the vendored fast pharmacophore path
+  that estimate justified was never written. Re-measured after standardization came
+  out of the per-molecule path; the previous figures (3.73 ms, 848 mol/s, two minutes)
+  included it.
 - **Mean non-zeros per molecule is 426**, not the 2,500 assumed.
 - **scipy's column indexing beats a hand-rolled reindex** (11.5 ms against 20.7 ms),
   so `apply_basis` uses it.

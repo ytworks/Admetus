@@ -6,8 +6,10 @@ Everything here is measured, not estimated. Reproduce the featurization numbers 
 with the feature-set machinery: there is one feature space now, so there is nothing
 to study.
 
-Measurement host: Apple Silicon (arm64), 10 cores (4 performance + 6 efficiency),
-16 GB RAM, macOS, Python 3.12.13, RDKit 2026.09.2, NumPy 2.5.5.
+Measurement host, as `sysctl` reports it: Apple M6 (arm64), 12 cores in three
+performance levels (2 + 4 + 6), 16 GB RAM, macOS, Python 3.12.15, RDKit 2026.09.2,
+NumPy 2.5.5. The earlier version of this line said 10 cores and Python 3.12.13,
+neither of which this machine has.
 
 ## Accuracy
 
@@ -147,17 +149,23 @@ full space is overkill anyway.
 A combinatorial drug-like library (1,200 molecules, 18-32 heavy atoms, median 25),
 `morgan_p23`, spawn pool, batches of 64:
 
-| workers | throughput | note                                  |
-|---------|------------|---------------------------------------|
-| 1       | 268 mol/s  | 3.73 ms/molecule                      |
-| 4       | 751 mol/s  | includes pool startup                 |
-| 9       | 848 mol/s  | includes pool startup                 |
+| workers | throughput   | note                                    |
+|---------|--------------|-----------------------------------------|
+| 1       | 342 mol/s    | 2.93 ms/molecule                        |
+| 4       | 993 mol/s    | includes pool startup                   |
+| 9       | 1,375 mol/s  | includes pool startup                   |
 
-**100,000 unique molecules project to roughly 2 minutes** at 9 workers. Mean non-zeros
+**100,000 unique molecules project to roughly 1.2 minutes** at 9 workers. Mean non-zeros
 per molecule is **426**, so a 10,000-row chunk holds about 4.3 million non-zeros rather
 than the 25 million a 2,500-non-zero assumption would predict.
 
-Speedup saturates near 3.2x rather than 9x for two reasons: six of the ten cores are
+Re-measured after standardization was removed, and the table above replaces the
+previous one (268 / 751 / 848 mol/s at 3.73 ms per molecule, projecting 2 minutes).
+Standardization was in the per-molecule path when those were taken, so the old numbers
+described work this pipeline no longer does. Two consecutive runs on an idle machine
+agreed to within 1%; the figures above are the second.
+
+Speedup saturates near 4x rather than 9x for two reasons: six of the twelve cores are
 efficiency cores running pure-Python work at roughly 40% of a performance core, and
 pool startup (RDKit import plus `SigFactory.Init()`, 1.5-3.5 s per worker) is a visible
 share of a 1,200-molecule run. Both argue for one pool per process rather than one per
@@ -175,8 +183,8 @@ chunk, and for falling back to in-process work on small inputs.
 | 10% | one-off feature detection per molecule |
 
 Memoizing `GetBitIdx` and converting the distance matrix to nested Python lists would
-plausibly give 1.5-2x. Against a measured 2 minutes per 100,000 molecules that does not
-justify vendoring and maintaining a copy of RDKit's generator, which would silently
+plausibly give 1.5-2x. Against a measured 1.2 minutes per 100,000 molecules that does
+not justify vendoring and maintaining a copy of RDKit's generator, which would silently
 diverge from upstream. The profile is recorded here so the decision can be revisited if
 a real workload shows otherwise.
 

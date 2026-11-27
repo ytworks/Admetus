@@ -327,9 +327,58 @@ admetus models pull --all
 ### 公式プロトコル
 
 TDC ADMET ベンチマークグループの 22 エンドポイントを、各データセットが公開している `train_val`
-分割で学習し、公開 `test` 分割で採点します。5 シードで、リーダーボードと同じ集計です。
-**現在実行中**です。この表は実行のレポートから生成するもので、推定では埋めないため、完了まで
-空のままにしてあります。
+分割で学習し、公開 `test` 分割で採点します。5 シードで、集計はリーダーボードと同じ方式です。
+各シードのスコアを小数 3 桁に丸めてから平均し、標準偏差は**母標準偏差**で、結果も丸めます。
+
+| Endpoint | Metric | Official protocol | Seeds | Test rows scored | Comparable |
+|---|---|---|---|---|---|
+| `caco2` | mae | 0.3220 +/- 0.0040 | 5 | 182 | yes |
+| `hia` | auroc | 0.9700 +/- 0.0070 | 5 | 117 | yes |
+| `pgp` | auroc | 0.9220 +/- 0.0030 | 5 | 245 | yes |
+| `bioavailability` | auroc | 0.7110 +/- 0.0170 | 5 | 128 | yes |
+| `lipophilicity` | mae | 0.5920 +/- 0.0070 | 5 | 840 | yes |
+| `solubility` | mae | 0.9410 +/- 0.0050 | 5 | 1995 of 1997 | no: 1995 of 1997 published test row(s) were scored; the rest could not be featurized |
+| `bbb` | auroc | 0.8860 +/- 0.0050 | 5 | 406 | yes |
+| `ppbr` | mae | 8.1580 +/- 0.1040 | 5 | 559 | yes |
+| `vdss` | spearman | 0.3760 +/- 0.0530 | 5 | 226 | yes |
+| `cyp2c9_veith` | auprc | 0.7670 +/- 0.0070 | 5 | 2419 | yes |
+| `cyp2d6_veith` | auprc | 0.6980 +/- 0.0030 | 5 | 2626 | yes |
+| `cyp3a4_veith` | auprc | 0.8680 +/- 0.0040 | 5 | 2467 | yes |
+| `cyp2c9_substrate` | auprc | 0.3880 +/- 0.0200 | 5 | 135 | yes |
+| `cyp2d6_substrate` | auprc | 0.6820 +/- 0.0280 | 5 | 135 | yes |
+| `cyp3a4_substrate` | auroc | 0.6210 +/- 0.0120 | 5 | 135 | yes |
+| `half_life` | spearman | 0.3050 +/- 0.0190 | 5 | 135 | yes |
+| `clearance_hepatocyte` | spearman | 0.3310 +/- 0.0350 | 5 | 243 | yes |
+| `clearance_microsome` | spearman | 0.5090 +/- 0.0390 | 5 | 221 | yes |
+| `ld50` | mae | 0.6430 +/- 0.0020 | 5 | 1478 | yes |
+| `herg` | auroc | 0.8550 +/- 0.0080 | 5 | 132 | yes |
+| `ames` | auroc | 0.8430 +/- 0.0020 | 5 | 1457 | yes |
+| `dili` | auroc | 0.8790 +/- 0.0260 | 5 | 96 | yes |
+
+110 回の実行、tuner の試行 13,698 回、4 プロセス並列で計算時間 5.7 時間。この表を生成した
+レポートは [docs/official-protocol-report.json](docs/official-protocol-report.json) に置いて
+あるので、実行を繰り返さなくても表は再生成できます。実行自体をやり直す場合は
+`admetus benchmark fetch` の後に次を実行します。
+
+```bash
+admetus benchmark run --all --time-budget 60 --report official.json
+```
+
+この表と併せて読むべきことが 4 つあります。
+
+- **チューニング予算が、公開バンドルのものと同じではありません。** これは fold あたり 60 秒、
+  ホールドアウトの表は 240 秒です。2 つの列は分割だけでなく学習予算も異なり、どちらかが
+  もう一方の訂正というわけではありません。
+- **ばらつきはシード間のもので、シードが動かす範囲はリーダーボードより狭いです。** ここで
+  シードが動かすのは学習側内部の fold 割り当てと、それを通じたハイパーパラメータおよび
+  アンサンブルです。`train_val` を train と valid に再サンプリングすることはしません。
+  平均は比較できますが、標準偏差はその理由でリーダーボードの項目より狭く出ます。
+- **22 件のうち 21 件がリーダーボード比較可**です。`solubility` は不可です。公開テスト 1,997 行
+  のうち特徴量化できたのは 1,995 行で、1,995 行のスコアは 1,997 行のスコアではありません。
+  失敗した 2 行は黙って落とさず報告します。
+- **シードごとに、その実行の中でチューニングします。** 本プロジェクト自身の全データ分割で
+  チューニングしたハイパーパラメータを流用すると、公式テスト化合物が探索の内側に入ります。
+  それはこのプロトコルが防ぐために存在する比較そのものです。
 
 どちらの表も `python scripts/benchmark_tables.py --models-dir models` で再生成します。バンドルから
 読み出すので手打ちしません。2 つの README は同じ数値を持つ必要があり、CI が数値セルを全件比較します。

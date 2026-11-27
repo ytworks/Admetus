@@ -338,8 +338,59 @@ so 12 minutes per endpoint. Reproduce one row with
 
 The 22 endpoints of the TDC ADMET benchmark group, trained on each dataset's own published
 `train_val` split and scored on its published `test` split, five seeds, aggregated the way the
-leaderboard aggregates. **Running now** -- this table is filled from the run's report, not from
-an estimate, so it stays absent until the run finishes.
+leaderboard aggregates: each seed's score rounded to three decimals, then the mean, with the
+**population** standard deviation, rounded.
+
+| Endpoint | Metric | Official protocol | Seeds | Test rows scored | Comparable |
+|---|---|---|---|---|---|
+| `caco2` | mae | 0.3220 +/- 0.0040 | 5 | 182 | yes |
+| `hia` | auroc | 0.9700 +/- 0.0070 | 5 | 117 | yes |
+| `pgp` | auroc | 0.9220 +/- 0.0030 | 5 | 245 | yes |
+| `bioavailability` | auroc | 0.7110 +/- 0.0170 | 5 | 128 | yes |
+| `lipophilicity` | mae | 0.5920 +/- 0.0070 | 5 | 840 | yes |
+| `solubility` | mae | 0.9410 +/- 0.0050 | 5 | 1995 of 1997 | no: 1995 of 1997 published test row(s) were scored; the rest could not be featurized |
+| `bbb` | auroc | 0.8860 +/- 0.0050 | 5 | 406 | yes |
+| `ppbr` | mae | 8.1580 +/- 0.1040 | 5 | 559 | yes |
+| `vdss` | spearman | 0.3760 +/- 0.0530 | 5 | 226 | yes |
+| `cyp2c9_veith` | auprc | 0.7670 +/- 0.0070 | 5 | 2419 | yes |
+| `cyp2d6_veith` | auprc | 0.6980 +/- 0.0030 | 5 | 2626 | yes |
+| `cyp3a4_veith` | auprc | 0.8680 +/- 0.0040 | 5 | 2467 | yes |
+| `cyp2c9_substrate` | auprc | 0.3880 +/- 0.0200 | 5 | 135 | yes |
+| `cyp2d6_substrate` | auprc | 0.6820 +/- 0.0280 | 5 | 135 | yes |
+| `cyp3a4_substrate` | auroc | 0.6210 +/- 0.0120 | 5 | 135 | yes |
+| `half_life` | spearman | 0.3050 +/- 0.0190 | 5 | 135 | yes |
+| `clearance_hepatocyte` | spearman | 0.3310 +/- 0.0350 | 5 | 243 | yes |
+| `clearance_microsome` | spearman | 0.5090 +/- 0.0390 | 5 | 221 | yes |
+| `ld50` | mae | 0.6430 +/- 0.0020 | 5 | 1478 | yes |
+| `herg` | auroc | 0.8550 +/- 0.0080 | 5 | 132 | yes |
+| `ames` | auroc | 0.8430 +/- 0.0020 | 5 | 1457 | yes |
+| `dili` | auroc | 0.8790 +/- 0.0260 | 5 | 96 | yes |
+
+110 runs, 13,698 tuner trials, 5.7 hours of compute across four parallel processes. The report
+this table was generated from is kept at
+[docs/official-protocol-report.json](docs/official-protocol-report.json), so the table can be
+rebuilt without repeating the run. To repeat it, `admetus benchmark fetch` and then
+
+```bash
+admetus benchmark run --all --time-budget 60 --report official.json
+```
+
+Four things to read with this table:
+
+- **The tuning budget is not the one the published bundles got.** This ran at 60 seconds per
+  fold, the held-out table at 240. The two columns therefore differ in training budget as well
+  as in split, and neither is a correction of the other.
+- **The spread is over seeds, and the seed moves less here than it does on the leaderboard.**
+  What it moves is the fold assignment inside the training portion, and through it the
+  hyperparameters and the ensemble. It does not resample `train_val` into train and validation.
+  The mean is comparable; the standard deviation is narrower than a leaderboard entry's for that
+  reason.
+- **21 of the 22 are leaderboard-comparable.** `solubility` is not: 1,995 of its 1,997 published
+  test rows could be featurized, and a score over 1,995 rows is not a score over 1,997. The two
+  that failed are reported rather than dropped quietly.
+- **Each seed is tuned inside its own run.** Reusing hyperparameters tuned on this project's own
+  split of the full dataset would put the official test compounds inside the search, which is the
+  comparison the protocol exists to prevent.
 
 Regenerate both tables with `python scripts/benchmark_tables.py --models-dir models`, which reads
 the bundles rather than being typed into: the two READMEs have to carry the same numbers and CI

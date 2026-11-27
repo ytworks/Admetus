@@ -1,0 +1,1397 @@
+{
+  "admetus_version": "0.1.0.dev0",
+  "archive_sha256": "bd0005246cb6f1672333c28ad202112a8bf071ab65d847848715030308faf1f1",
+  "complete_protocol": true,
+  "failed": [],
+  "merged_from": [
+    "a.json",
+    "b1.json",
+    "b2.json",
+    "c.json"
+  ],
+  "merged_note": "wall clock is the sum of the shards, which ran in parallel; it is the compute spent, not the time taken",
+  "n_comparable": 21,
+  "n_endpoints": 22,
+  "ok": true,
+  "protocol": "official benchmark group: published train_val/test split per endpoint",
+  "results": [
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "cyp2d6_veith",
+      "failures": [],
+      "mean": 0.698,
+      "mean_unrounded": 0.6980106658864592,
+      "metric": "auprc",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.003,
+      "seeds": [
+        {
+          "n_test": 2626,
+          "n_test_published": 2626,
+          "n_train": 10504,
+          "n_trials": 33,
+          "score": 0.6961217150921366,
+          "seconds": 238.2,
+          "seed": 1
+        },
+        {
+          "n_test": 2626,
+          "n_test_published": 2626,
+          "n_train": 10504,
+          "n_trials": 35,
+          "score": 0.7020280658868729,
+          "seconds": 245.1,
+          "seed": 2
+        },
+        {
+          "n_test": 2626,
+          "n_test_published": 2626,
+          "n_train": 10504,
+          "n_trials": 34,
+          "score": 0.6963716664966627,
+          "seconds": 235.1,
+          "seed": 3
+        },
+        {
+          "n_test": 2626,
+          "n_test_published": 2626,
+          "n_train": 10504,
+          "n_trials": 32,
+          "score": 0.6940960140189683,
+          "seconds": 238.6,
+          "seed": 4
+        },
+        {
+          "n_test": 2626,
+          "n_test_published": 2626,
+          "n_train": 10504,
+          "n_trials": 35,
+          "score": 0.7014358679376553,
+          "seconds": 241.1,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "ames",
+      "failures": [],
+      "mean": 0.843,
+      "mean_unrounded": 0.8431545556012454,
+      "metric": "auroc",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.002,
+      "seeds": [
+        {
+          "n_test": 1457,
+          "n_test_published": 1457,
+          "n_train": 5821,
+          "n_trials": 60,
+          "score": 0.8438563512111065,
+          "seconds": 211.2,
+          "seed": 1
+        },
+        {
+          "n_test": 1457,
+          "n_test_published": 1457,
+          "n_train": 5821,
+          "n_trials": 60,
+          "score": 0.8455893007499657,
+          "seconds": 206.4,
+          "seed": 2
+        },
+        {
+          "n_test": 1457,
+          "n_test_published": 1457,
+          "n_train": 5821,
+          "n_trials": 66,
+          "score": 0.8408545301454894,
+          "seconds": 202.0,
+          "seed": 3
+        },
+        {
+          "n_test": 1457,
+          "n_test_published": 1457,
+          "n_train": 5821,
+          "n_trials": 61,
+          "score": 0.8433609430378507,
+          "seconds": 203.0,
+          "seed": 4
+        },
+        {
+          "n_test": 1457,
+          "n_test_published": 1457,
+          "n_train": 5821,
+          "n_trials": 60,
+          "score": 0.8421116528618144,
+          "seconds": 201.2,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "lipophilicity",
+      "failures": [],
+      "mean": 0.592,
+      "mean_unrounded": 0.5923499217085186,
+      "metric": "mae",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.007,
+      "seeds": [
+        {
+          "n_test": 840,
+          "n_test_published": 840,
+          "n_train": 3360,
+          "n_trials": 41,
+          "score": 0.5937377117700092,
+          "seconds": 206.0,
+          "seed": 1
+        },
+        {
+          "n_test": 840,
+          "n_test_published": 840,
+          "n_train": 3360,
+          "n_trials": 37,
+          "score": 0.5902009333339747,
+          "seconds": 210.0,
+          "seed": 2
+        },
+        {
+          "n_test": 840,
+          "n_test_published": 840,
+          "n_train": 3360,
+          "n_trials": 39,
+          "score": 0.5821494604713188,
+          "seconds": 201.9,
+          "seed": 3
+        },
+        {
+          "n_test": 840,
+          "n_test_published": 840,
+          "n_train": 3360,
+          "n_trials": 34,
+          "score": 0.603139249743633,
+          "seconds": 202.2,
+          "seed": 4
+        },
+        {
+          "n_test": 840,
+          "n_test_published": 840,
+          "n_train": 3360,
+          "n_trials": 38,
+          "score": 0.5925222532236579,
+          "seconds": 207.6,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "pgp",
+      "failures": [],
+      "mean": 0.922,
+      "mean_unrounded": 0.9222873900293257,
+      "metric": "auroc",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.003,
+      "seeds": [
+        {
+          "n_test": 245,
+          "n_test_published": 245,
+          "n_train": 973,
+          "n_trials": 167,
+          "score": 0.9198213809650759,
+          "seconds": 186.8,
+          "seed": 1
+        },
+        {
+          "n_test": 245,
+          "n_test_published": 245,
+          "n_train": 973,
+          "n_trials": 178,
+          "score": 0.9232871234337511,
+          "seconds": 187.4,
+          "seed": 2
+        },
+        {
+          "n_test": 245,
+          "n_test_published": 245,
+          "n_train": 973,
+          "n_trials": 170,
+          "score": 0.9200879765395895,
+          "seconds": 187.4,
+          "seed": 3
+        },
+        {
+          "n_test": 245,
+          "n_test_published": 245,
+          "n_train": 973,
+          "n_trials": 162,
+          "score": 0.9209544121567583,
+          "seconds": 187.0,
+          "seed": 4
+        },
+        {
+          "n_test": 245,
+          "n_test_published": 245,
+          "n_train": 973,
+          "n_trials": 161,
+          "score": 0.9272860570514528,
+          "seconds": 188.4,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "caco2",
+      "failures": [],
+      "mean": 0.322,
+      "mean_unrounded": 0.3219820523540036,
+      "metric": "mae",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.004,
+      "seeds": [
+        {
+          "n_test": 182,
+          "n_test_published": 182,
+          "n_train": 728,
+          "n_trials": 124,
+          "score": 0.3272717066940556,
+          "seconds": 188.4,
+          "seed": 1
+        },
+        {
+          "n_test": 182,
+          "n_test_published": 182,
+          "n_train": 728,
+          "n_trials": 146,
+          "score": 0.32266163150831856,
+          "seconds": 189.1,
+          "seed": 2
+        },
+        {
+          "n_test": 182,
+          "n_test_published": 182,
+          "n_train": 728,
+          "n_trials": 129,
+          "score": 0.32547538824746125,
+          "seconds": 189.7,
+          "seed": 3
+        },
+        {
+          "n_test": 182,
+          "n_test_published": 182,
+          "n_train": 728,
+          "n_trials": 140,
+          "score": 0.3153167743822839,
+          "seconds": 188.3,
+          "seed": 4
+        },
+        {
+          "n_test": 182,
+          "n_test_published": 182,
+          "n_train": 728,
+          "n_trials": 162,
+          "score": 0.3191847609378986,
+          "seconds": 188.1,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "cyp2d6_substrate",
+      "failures": [],
+      "mean": 0.682,
+      "mean_unrounded": 0.6815536846856969,
+      "metric": "auprc",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.028,
+      "seeds": [
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 532,
+          "n_trials": 201,
+          "score": 0.6290490931723421,
+          "seconds": 139.7,
+          "seed": 1
+        },
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 532,
+          "n_trials": 201,
+          "score": 0.6778201502227579,
+          "seconds": 157.3,
+          "seed": 2
+        },
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 532,
+          "n_trials": 198,
+          "score": 0.699134029512033,
+          "seconds": 137.6,
+          "seed": 3
+        },
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 532,
+          "n_trials": 201,
+          "score": 0.7055354601953112,
+          "seconds": 151.2,
+          "seed": 4
+        },
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 532,
+          "n_trials": 201,
+          "score": 0.69622969032604,
+          "seconds": 141.2,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "bioavailability",
+      "failures": [],
+      "mean": 0.711,
+      "mean_unrounded": 0.7111406717658796,
+      "metric": "auroc",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.017,
+      "seeds": [
+        {
+          "n_test": 128,
+          "n_test_published": 128,
+          "n_train": 512,
+          "n_trials": 201,
+          "score": 0.7259727302959761,
+          "seconds": 144.4,
+          "seed": 1
+        },
+        {
+          "n_test": 128,
+          "n_test_published": 128,
+          "n_train": 512,
+          "n_trials": 204,
+          "score": 0.7189890256069171,
+          "seconds": 138.8,
+          "seed": 2
+        },
+        {
+          "n_test": 128,
+          "n_test_published": 128,
+          "n_train": 512,
+          "n_trials": 201,
+          "score": 0.7149983372131693,
+          "seconds": 125.1,
+          "seed": 3
+        },
+        {
+          "n_test": 128,
+          "n_test_published": 128,
+          "n_train": 512,
+          "n_trials": 201,
+          "score": 0.678084469571001,
+          "seconds": 128.0,
+          "seed": 4
+        },
+        {
+          "n_test": 128,
+          "n_test_published": 128,
+          "n_train": 512,
+          "n_trials": 198,
+          "score": 0.7176587961423344,
+          "seconds": 123.9,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "dili",
+      "failures": [],
+      "mean": 0.879,
+      "mean_unrounded": 0.8793913043478261,
+      "metric": "auroc",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.026,
+      "seeds": [
+        {
+          "n_test": 96,
+          "n_test_published": 96,
+          "n_train": 379,
+          "n_trials": 204,
+          "score": 0.8921739130434782,
+          "seconds": 111.7,
+          "seed": 1
+        },
+        {
+          "n_test": 96,
+          "n_test_published": 96,
+          "n_train": 379,
+          "n_trials": 204,
+          "score": 0.8852173913043477,
+          "seconds": 116.7,
+          "seed": 2
+        },
+        {
+          "n_test": 96,
+          "n_test_published": 96,
+          "n_train": 379,
+          "n_trials": 201,
+          "score": 0.8739130434782609,
+          "seconds": 112.7,
+          "seed": 3
+        },
+        {
+          "n_test": 96,
+          "n_test_published": 96,
+          "n_train": 379,
+          "n_trials": 198,
+          "score": 0.9117391304347826,
+          "seconds": 119.6,
+          "seed": 4
+        },
+        {
+          "n_test": 96,
+          "n_test_published": 96,
+          "n_train": 379,
+          "n_trials": 201,
+          "score": 0.8339130434782608,
+          "seconds": 109.8,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "cyp3a4_veith",
+      "failures": [],
+      "mean": 0.868,
+      "mean_unrounded": 0.8681992641882559,
+      "metric": "auprc",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.004,
+      "seeds": [
+        {
+          "n_test": 2467,
+          "n_test_published": 2467,
+          "n_train": 9861,
+          "n_trials": 36,
+          "score": 0.872897111272545,
+          "seconds": 232.4,
+          "seed": 1
+        },
+        {
+          "n_test": 2467,
+          "n_test_published": 2467,
+          "n_train": 9861,
+          "n_trials": 36,
+          "score": 0.8698370852491701,
+          "seconds": 234.3,
+          "seed": 2
+        },
+        {
+          "n_test": 2467,
+          "n_test_published": 2467,
+          "n_train": 9861,
+          "n_trials": 38,
+          "score": 0.8612376143344505,
+          "seconds": 233.6,
+          "seed": 3
+        },
+        {
+          "n_test": 2467,
+          "n_test_published": 2467,
+          "n_train": 9861,
+          "n_trials": 36,
+          "score": 0.8705835577757614,
+          "seconds": 236.7,
+          "seed": 4
+        },
+        {
+          "n_test": 2467,
+          "n_test_published": 2467,
+          "n_train": 9861,
+          "n_trials": 37,
+          "score": 0.8664409523093517,
+          "seconds": 234.2,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "bbb",
+      "failures": [],
+      "mean": 0.886,
+      "mean_unrounded": 0.8856785490931832,
+      "metric": "auroc",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.005,
+      "seeds": [
+        {
+          "n_test": 406,
+          "n_test_published": 406,
+          "n_train": 1624,
+          "n_trials": 102,
+          "score": 0.8887585991244529,
+          "seconds": 192.3,
+          "seed": 1
+        },
+        {
+          "n_test": 406,
+          "n_test_published": 406,
+          "n_train": 1624,
+          "n_trials": 114,
+          "score": 0.8802767354596625,
+          "seconds": 192.5,
+          "seed": 2
+        },
+        {
+          "n_test": 406,
+          "n_test_published": 406,
+          "n_train": 1624,
+          "n_trials": 113,
+          "score": 0.8787523452157598,
+          "seconds": 191.9,
+          "seed": 3
+        },
+        {
+          "n_test": 406,
+          "n_test_published": 406,
+          "n_train": 1624,
+          "n_trials": 124,
+          "score": 0.8925500312695435,
+          "seconds": 193.2,
+          "seed": 4
+        },
+        {
+          "n_test": 406,
+          "n_test_published": 406,
+          "n_train": 1624,
+          "n_trials": 125,
+          "score": 0.8880550343964978,
+          "seconds": 193.6,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "cyp3a4_substrate",
+      "failures": [],
+      "mean": 0.621,
+      "mean_unrounded": 0.6211799276672694,
+      "metric": "auroc",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.012,
+      "seeds": [
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 535,
+          "n_trials": 204,
+          "score": 0.6305379746835442,
+          "seconds": 158.9,
+          "seed": 1
+        },
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 535,
+          "n_trials": 198,
+          "score": 0.6140370705244123,
+          "seconds": 164.0,
+          "seed": 2
+        },
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 535,
+          "n_trials": 201,
+          "score": 0.6070298372513562,
+          "seconds": 155.9,
+          "seed": 3
+        },
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 535,
+          "n_trials": 204,
+          "score": 0.6398056057866184,
+          "seconds": 156.4,
+          "seed": 4
+        },
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 535,
+          "n_trials": 198,
+          "score": 0.614489150090416,
+          "seconds": 159.7,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "hia",
+      "failures": [],
+      "mean": 0.97,
+      "mean_unrounded": 0.9697942386831278,
+      "metric": "auroc",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.007,
+      "seeds": [
+        {
+          "n_test": 117,
+          "n_test_published": 117,
+          "n_train": 461,
+          "n_trials": 201,
+          "score": 0.9650205761316872,
+          "seconds": 160.5,
+          "seed": 1
+        },
+        {
+          "n_test": 117,
+          "n_test_published": 117,
+          "n_train": 461,
+          "n_trials": 197,
+          "score": 0.9810699588477367,
+          "seconds": 170.4,
+          "seed": 2
+        },
+        {
+          "n_test": 117,
+          "n_test_published": 117,
+          "n_train": 461,
+          "n_trials": 200,
+          "score": 0.9666666666666668,
+          "seconds": 165.2,
+          "seed": 3
+        },
+        {
+          "n_test": 117,
+          "n_test_published": 117,
+          "n_train": 461,
+          "n_trials": 201,
+          "score": 0.9609053497942388,
+          "seconds": 164.0,
+          "seed": 4
+        },
+        {
+          "n_test": 117,
+          "n_test_published": 117,
+          "n_train": 461,
+          "n_trials": 187,
+          "score": 0.9753086419753086,
+          "seconds": 173.6,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "ld50",
+      "failures": [],
+      "mean": 0.643,
+      "mean_unrounded": 0.6426406041607581,
+      "metric": "mae",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.002,
+      "seeds": [
+        {
+          "n_test": 1478,
+          "n_test_published": 1478,
+          "n_train": 5907,
+          "n_trials": 57,
+          "score": 0.6459596754775339,
+          "seconds": 198.5,
+          "seed": 1
+        },
+        {
+          "n_test": 1478,
+          "n_test_published": 1478,
+          "n_train": 5907,
+          "n_trials": 55,
+          "score": 0.6437108722405596,
+          "seconds": 198.9,
+          "seed": 2
+        },
+        {
+          "n_test": 1478,
+          "n_test_published": 1478,
+          "n_train": 5907,
+          "n_trials": 57,
+          "score": 0.6411847358159046,
+          "seconds": 198.5,
+          "seed": 3
+        },
+        {
+          "n_test": 1478,
+          "n_test_published": 1478,
+          "n_train": 5907,
+          "n_trials": 52,
+          "score": 0.640785003091275,
+          "seconds": 197.8,
+          "seed": 4
+        },
+        {
+          "n_test": 1478,
+          "n_test_published": 1478,
+          "n_train": 5907,
+          "n_trials": 54,
+          "score": 0.641562734178517,
+          "seconds": 203.6,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "ppbr",
+      "failures": [],
+      "mean": 8.158,
+      "mean_unrounded": 8.158382559456303,
+      "metric": "mae",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.104,
+      "seeds": [
+        {
+          "n_test": 559,
+          "n_test_published": 559,
+          "n_train": 2231,
+          "n_trials": 76,
+          "score": 8.167991606831603,
+          "seconds": 197.8,
+          "seed": 1
+        },
+        {
+          "n_test": 559,
+          "n_test_published": 559,
+          "n_train": 2231,
+          "n_trials": 86,
+          "score": 7.96491777980784,
+          "seconds": 199.3,
+          "seed": 2
+        },
+        {
+          "n_test": 559,
+          "n_test_published": 559,
+          "n_train": 2231,
+          "n_trials": 81,
+          "score": 8.172894027334175,
+          "seconds": 200.6,
+          "seed": 3
+        },
+        {
+          "n_test": 559,
+          "n_test_published": 559,
+          "n_train": 2231,
+          "n_trials": 87,
+          "score": 8.209199927293692,
+          "seconds": 200.6,
+          "seed": 4
+        },
+        {
+          "n_test": 559,
+          "n_test_published": 559,
+          "n_train": 2231,
+          "n_trials": 72,
+          "score": 8.276909456014204,
+          "seconds": 197.8,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "clearance_hepatocyte",
+      "failures": [],
+      "mean": 0.331,
+      "mean_unrounded": 0.33080204901174726,
+      "metric": "spearman",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.035,
+      "seeds": [
+        {
+          "n_test": 243,
+          "n_test_published": 243,
+          "n_train": 970,
+          "n_trials": 134,
+          "score": 0.29763905276896324,
+          "seconds": 189.1,
+          "seed": 1
+        },
+        {
+          "n_test": 243,
+          "n_test_published": 243,
+          "n_train": 970,
+          "n_trials": 187,
+          "score": 0.3555472044063073,
+          "seconds": 188.3,
+          "seed": 2
+        },
+        {
+          "n_test": 243,
+          "n_test_published": 243,
+          "n_train": 970,
+          "n_trials": 159,
+          "score": 0.3730888535729898,
+          "seconds": 188.8,
+          "seed": 3
+        },
+        {
+          "n_test": 243,
+          "n_test_published": 243,
+          "n_train": 970,
+          "n_trials": 162,
+          "score": 0.3466203242980392,
+          "seconds": 189.1,
+          "seed": 4
+        },
+        {
+          "n_test": 243,
+          "n_test_published": 243,
+          "n_train": 970,
+          "n_trials": 160,
+          "score": 0.2811148100124368,
+          "seconds": 188.8,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "half_life",
+      "failures": [],
+      "mean": 0.305,
+      "mean_unrounded": 0.3051848527400288,
+      "metric": "spearman",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.019,
+      "seeds": [
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 532,
+          "n_trials": 130,
+          "score": 0.31290938433183757,
+          "seconds": 192.3,
+          "seed": 1
+        },
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 532,
+          "n_trials": 127,
+          "score": 0.3018286937661328,
+          "seconds": 192.6,
+          "seed": 2
+        },
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 532,
+          "n_trials": 121,
+          "score": 0.3167996994214917,
+          "seconds": 196.2,
+          "seed": 3
+        },
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 532,
+          "n_trials": 137,
+          "score": 0.26957688409183983,
+          "seconds": 193.3,
+          "seed": 4
+        },
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 532,
+          "n_trials": 161,
+          "score": 0.3248096020888424,
+          "seconds": 189.9,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "cyp2c9_veith",
+      "failures": [],
+      "mean": 0.767,
+      "mean_unrounded": 0.7673927688984227,
+      "metric": "auprc",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.007,
+      "seeds": [
+        {
+          "n_test": 2419,
+          "n_test_published": 2419,
+          "n_train": 9673,
+          "n_trials": 37,
+          "score": 0.7598172589830222,
+          "seconds": 233.9,
+          "seed": 1
+        },
+        {
+          "n_test": 2419,
+          "n_test_published": 2419,
+          "n_train": 9673,
+          "n_trials": 34,
+          "score": 0.7680572917132067,
+          "seconds": 236.2,
+          "seed": 2
+        },
+        {
+          "n_test": 2419,
+          "n_test_published": 2419,
+          "n_train": 9673,
+          "n_trials": 33,
+          "score": 0.7728014999263386,
+          "seconds": 237.5,
+          "seed": 3
+        },
+        {
+          "n_test": 2419,
+          "n_test_published": 2419,
+          "n_train": 9673,
+          "n_trials": 32,
+          "score": 0.7764527583126279,
+          "seconds": 240.6,
+          "seed": 4
+        },
+        {
+          "n_test": 2419,
+          "n_test_published": 2419,
+          "n_train": 9673,
+          "n_trials": 34,
+          "score": 0.7598350355569181,
+          "seconds": 232.0,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": false,
+      "endpoint": "solubility",
+      "failures": [],
+      "mean": 0.941,
+      "mean_unrounded": 0.9404271827853645,
+      "metric": "mae",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [
+        "1995 of 1997 published test row(s) were scored; the rest could not be featurized"
+      ],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.005,
+      "seeds": [
+        {
+          "n_test": 1995,
+          "n_test_published": 1997,
+          "n_train": 7985,
+          "n_trials": 34,
+          "score": 0.9456512995192206,
+          "seconds": 254.9,
+          "seed": 1
+        },
+        {
+          "n_test": 1995,
+          "n_test_published": 1997,
+          "n_train": 7985,
+          "n_trials": 35,
+          "score": 0.9425019344123765,
+          "seconds": 249.9,
+          "seed": 2
+        },
+        {
+          "n_test": 1995,
+          "n_test_published": 1997,
+          "n_train": 7985,
+          "n_trials": 35,
+          "score": 0.9333516081141019,
+          "seconds": 257.5,
+          "seed": 3
+        },
+        {
+          "n_test": 1995,
+          "n_test_published": 1997,
+          "n_train": 7985,
+          "n_trials": 31,
+          "score": 0.9366996590997455,
+          "seconds": 249.0,
+          "seed": 4
+        },
+        {
+          "n_test": 1995,
+          "n_test_published": 1997,
+          "n_train": 7985,
+          "n_trials": 36,
+          "score": 0.9439314127813783,
+          "seconds": 250.8,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "vdss",
+      "failures": [],
+      "mean": 0.376,
+      "mean_unrounded": 0.37643254623853906,
+      "metric": "spearman",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.053,
+      "seeds": [
+        {
+          "n_test": 226,
+          "n_test_published": 226,
+          "n_train": 904,
+          "n_trials": 84,
+          "score": 0.310267631985673,
+          "seconds": 206.6,
+          "seed": 1
+        },
+        {
+          "n_test": 226,
+          "n_test_published": 226,
+          "n_train": 904,
+          "n_trials": 87,
+          "score": 0.468122177307485,
+          "seconds": 211.5,
+          "seed": 2
+        },
+        {
+          "n_test": 226,
+          "n_test_published": 226,
+          "n_train": 904,
+          "n_trials": 90,
+          "score": 0.34344506446408196,
+          "seconds": 210.0,
+          "seed": 3
+        },
+        {
+          "n_test": 226,
+          "n_test_published": 226,
+          "n_train": 904,
+          "n_trials": 90,
+          "score": 0.3706744510896821,
+          "seconds": 210.2,
+          "seed": 4
+        },
+        {
+          "n_test": 226,
+          "n_test_published": 226,
+          "n_train": 904,
+          "n_trials": 100,
+          "score": 0.38965340634577295,
+          "seconds": 208.8,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "clearance_microsome",
+      "failures": [],
+      "mean": 0.509,
+      "mean_unrounded": 0.5083977126837161,
+      "metric": "spearman",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.039,
+      "seeds": [
+        {
+          "n_test": 221,
+          "n_test_published": 221,
+          "n_train": 881,
+          "n_trials": 145,
+          "score": 0.447594899662248,
+          "seconds": 187.2,
+          "seed": 1
+        },
+        {
+          "n_test": 221,
+          "n_test_published": 221,
+          "n_train": 881,
+          "n_trials": 176,
+          "score": 0.5489200442192455,
+          "seconds": 187.8,
+          "seed": 2
+        },
+        {
+          "n_test": 221,
+          "n_test_published": 221,
+          "n_train": 881,
+          "n_trials": 145,
+          "score": 0.5335623439427783,
+          "seconds": 188.2,
+          "seed": 3
+        },
+        {
+          "n_test": 221,
+          "n_test_published": 221,
+          "n_train": 881,
+          "n_trials": 147,
+          "score": 0.5362233681759366,
+          "seconds": 186.3,
+          "seed": 4
+        },
+        {
+          "n_test": 221,
+          "n_test_published": 221,
+          "n_train": 881,
+          "n_trials": 168,
+          "score": 0.4756879074183722,
+          "seconds": 187.3,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "cyp2c9_substrate",
+      "failures": [],
+      "mean": 0.388,
+      "mean_unrounded": 0.38854397034760574,
+      "metric": "auprc",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.02,
+      "seeds": [
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 534,
+          "n_trials": 197,
+          "score": 0.4031624986617645,
+          "seconds": 161.5,
+          "seed": 1
+        },
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 534,
+          "n_trials": 198,
+          "score": 0.35631446693092395,
+          "seconds": 148.0,
+          "seed": 2
+        },
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 534,
+          "n_trials": 200,
+          "score": 0.37365965085703695,
+          "seconds": 155.3,
+          "seed": 3
+        },
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 534,
+          "n_trials": 201,
+          "score": 0.40025047193529495,
+          "seconds": 143.1,
+          "seed": 4
+        },
+        {
+          "n_test": 135,
+          "n_test_published": 135,
+          "n_train": 534,
+          "n_trials": 201,
+          "score": 0.4093327633530081,
+          "seconds": 150.3,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    },
+    {
+      "aggregation": "TDC: per-seed scores rounded to 3dp, population sd, result rounded",
+      "comparable_with_leaderboard": true,
+      "endpoint": "herg",
+      "failures": [],
+      "mean": 0.855,
+      "mean_unrounded": 0.8556406480117822,
+      "metric": "auroc",
+      "n_seeds": 5,
+      "n_seeds_requested": 5,
+      "not_comparable_because": [],
+      "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
+      "sd": 0.008,
+      "seeds": [
+        {
+          "n_test": 132,
+          "n_test_published": 132,
+          "n_train": 523,
+          "n_trials": 198,
+          "score": 0.8484536082474227,
+          "seconds": 138.7,
+          "seed": 1
+        },
+        {
+          "n_test": 132,
+          "n_test_published": 132,
+          "n_train": 523,
+          "n_trials": 204,
+          "score": 0.8702503681885125,
+          "seconds": 131.4,
+          "seed": 2
+        },
+        {
+          "n_test": 132,
+          "n_test_published": 132,
+          "n_train": 523,
+          "n_trials": 201,
+          "score": 0.8549337260677466,
+          "seconds": 145.6,
+          "seed": 3
+        },
+        {
+          "n_test": 132,
+          "n_test_published": 132,
+          "n_train": 523,
+          "n_trials": 195,
+          "score": 0.848159057437408,
+          "seconds": 144.2,
+          "seed": 4
+        },
+        {
+          "n_test": 132,
+          "n_test_published": 132,
+          "n_train": 523,
+          "n_trials": 204,
+          "score": 0.8564064801178204,
+          "seconds": 127.3,
+          "seed": 5
+        }
+      ],
+      "tuned_per_seed": true
+    }
+  ],
+  "schema_version": 1,
+  "seconds": 20624.6,
+  "seeds": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "seeds_requested": 5,
+  "time_budget_seconds_per_fold": 60,
+  "tuned_per_seed": true
+}
