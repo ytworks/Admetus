@@ -230,18 +230,30 @@ def fetch_dataset(
         result = fetch(url, path, overwrite=overwrite, expected_sha256=expected_sha256)
     except DigestMismatch as mismatch:
         if not accept_upstream_change:
+            quarantined = _quarantine(mismatch) if mismatch.from_cache else None
+            detail = (
+                f"\n  the file has been moved aside to {quarantined.name} so nothing reads it"
+                if quarantined
+                else "\n  nothing on disk was replaced"
+            )
             raise NetworkError(
-                f"{key}: {mismatch}\n\nThe published dataset was most likely revised. Models "
-                "trained on the pinned bytes would no longer match this file, so the fetch is "
-                "refused and nothing on disk was replaced. To take the new version deliberately, "
-                "pass --accept-upstream-change, then update the sha256 in endpoints.yaml and "
-                "retrain the affected endpoints."
+                f"{key}: {mismatch}{detail}\n\nThe published dataset was most likely revised, or "
+                "the local file was altered. Models trained on the pinned bytes would no longer "
+                "match it, so the fetch is refused. To take the new version deliberately, pass "
+                "--accept-upstream-change, then update the sha256 in endpoints.yaml and retrain "
+                "the affected endpoints."
             ) from mismatch
+
         log.warning(
             "%s: %s\n\nAccepted because --accept-upstream-change was given. Any model trained "
             "on the pinned bytes is now STALE and must be retrained.", key, mismatch,
         )
-        result = fetch(url, path, overwrite=not mismatch.from_cache)
+        # Pin the retry to exactly the digest the warning reported. Re-fetching
+        # unpinned would let a second response differ from the bytes the operator
+        # was shown and agreed to, which is the same gap the pin exists to close.
+        result = fetch(
+            url, path, overwrite=not mismatch.from_cache, expected_sha256=mismatch.actual
+        )
 
     # An observed-state record, not the source of truth. The registry is that.
     checksums = read_checksums(directory)
@@ -254,6 +266,23 @@ def fetch_dataset(
     }
     write_checksums(directory, checksums)
     return result
+
+
+def _quarantine(mismatch: DigestMismatch) -> Path | None:
+    """Move a cached file that failed its digest check out of the way.
+
+    Renamed rather than deleted: the canonical path has to be cleared so no later
+    read picks the file up, but the bytes are worth keeping so an operator can see
+    what arrived. The download branch needs none of this, since a mismatched
+    download never reaches the canonical path.
+    """
+    target = mismatch.path.with_name(mismatch.path.name + ".mismatch")
+    try:
+        mismatch.path.replace(target)
+    except OSError as exc:  # pragma: no cover - permissions or a vanished file
+        log.warning("could not move %s aside: %s", mismatch.path, exc)
+        return None
+    return target
 
 
 def verify_dataset(key: str, directory: Path, expected_sha256: str | None = None) -> tuple[bool, str]:

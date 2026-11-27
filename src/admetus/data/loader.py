@@ -128,21 +128,47 @@ def _parse_label(text: str, task: str) -> float:
     return value
 
 
-def load(endpoint: Endpoint, directory: Path) -> Dataset:
+def load(endpoint: Endpoint, directory: Path, verify_digest: bool = True) -> Dataset:
     """Read and normalize one endpoint's dataset.
+
+    The file's digest is checked against the one pinned in the registry before any
+    of it is read. The fetcher checks too, but a dataset can be altered after it
+    was fetched, and a model's recorded provenance is only worth something if the
+    bytes are verified at the point they are actually used.
 
     Args:
         endpoint: Which dataset to read.
         directory: Where ``admetus data fetch`` put the files.
+        verify_digest: Check the file against the registry's pinned digest.
+            Endpoints with no pin are read either way.
 
     Returns:
         A normalized :class:`Dataset`.
 
     Raises:
-        InputDataError: The file is missing, has no recognizable columns, or is
-            not the shape the endpoint describes.
+        InputDataError: The file is missing, does not match its pinned digest,
+            has no recognizable columns, or is not the shape the endpoint
+            describes.
     """
     path = Path(directory) / f"{endpoint.key}.tab"
+    if verify_digest and endpoint.sha256:
+        from admetus.data.download import sha256_file
+
+        if not path.is_file():
+            raise InputDataError(
+                f"dataset file is missing: {path}. Run 'admetus data fetch' first."
+            )
+        actual = sha256_file(path)
+        if actual != endpoint.sha256:
+            raise InputDataError(
+                f"{endpoint.key}: the dataset on disk does not match the digest pinned in the "
+                f"registry, so it is not the data any model was trained on.\n"
+                f"  pinned: {endpoint.sha256}\n"
+                f"  found:  {actual}\n"
+                f"  file:   {path}\n\n"
+                "Re-fetch it with 'admetus data fetch --endpoint "
+                f"{endpoint.key} --overwrite'."
+            )
     header, rows = _read_rows(path)
     n_raw = len(rows)
 

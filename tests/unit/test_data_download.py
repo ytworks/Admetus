@@ -53,27 +53,72 @@ def test_refusal_names_both_digests_and_the_remedy(staged):
     assert "--accept-upstream-change" in message
 
 
-def test_refusal_leaves_the_existing_file_untouched(staged):
-    """A refused fetch must not destroy a file that verified earlier.
+def test_a_cached_file_that_fails_its_digest_is_moved_aside(staged):
+    """The canonical path must be cleared so nothing later reads the bad bytes.
 
-    The digest is checked before anything is moved into place, so a mismatch
-    removes only the temporary download. An earlier version checked after the
-    rename and then deleted the file, which turned a bad fetch into data loss.
+    The file is renamed rather than deleted: clearing the path is what matters,
+    and keeping the bytes lets someone see what actually arrived.
     """
     before = (staged / "fixture.tab").read_bytes()
-    with pytest.raises(NetworkError):
+    with pytest.raises(NetworkError, match="moved aside"):
         fetch_dataset("fixture", "https://example.invalid/x", staged, expected_sha256=WRONG)
-    assert (staged / "fixture.tab").read_bytes() == before
+
+    assert not (staged / "fixture.tab").exists()
+    quarantined = staged / "fixture.tab.mismatch"
+    assert quarantined.read_bytes() == before
     # And nothing was recorded for a fetch that did not happen.
     assert "fixture" not in read_checksums(staged)
 
 
-def test_a_refused_download_leaves_no_temporary_file(tmp_path):
-    """The mismatched bytes must not be left behind at the partial path either."""
-    (tmp_path / "fixture.tab").write_bytes(CONTENT)
+def test_a_refusal_leaves_no_temporary_file(staged):
+    """Mismatched bytes must not be left behind at the partial path either."""
     with pytest.raises(NetworkError):
-        fetch_dataset("fixture", "https://example.invalid/x", tmp_path, expected_sha256=WRONG)
-    assert not list(tmp_path.glob("*.part"))
+        fetch_dataset("fixture", "https://example.invalid/x", staged, expected_sha256=WRONG)
+    assert not list(staged.glob("*.part"))
+
+
+def test_a_loader_will_not_read_a_file_that_fails_its_pin(tmp_path):
+    """The fetcher is not the only guard: a file can be altered after it is fetched."""
+    from admetus.data import loader
+    from admetus.data.registry import Endpoint
+    from admetus.errors import InputDataError
+
+    (tmp_path / "fixture.tab").write_bytes(CONTENT + b"c\tCCC\t1\n")
+    endpoint = Endpoint(
+        key="fixture", tdc_name="F", dataverse_id=1, task="classification",
+        metric="auroc", unit="binary", in_official_group=False,
+        description="x", sha256=DIGEST,
+    )
+    with pytest.raises(InputDataError, match="does not match the digest pinned"):
+        loader.load(endpoint, tmp_path)
+
+    # The same file reads fine once the check is deliberately skipped.
+    assert len(loader.load(endpoint, tmp_path, verify_digest=False)) == 3
+
+
+def test_the_accept_path_is_pinned_to_the_digest_it_reported(staged, monkeypatch):
+    """Accepting a change must adopt the bytes the warning named, not a later fetch.
+
+    Re-fetching unpinned would let a second response differ from what the operator
+    was shown and agreed to, which is the gap the pin exists to close.
+    """
+    import admetus.data.download as module
+
+    calls: list[str | None] = []
+    real = module.fetch
+
+    def spy(url, destination, timeout=120.0, overwrite=False, expected_sha256=None):
+        calls.append(expected_sha256)
+        return real(url, destination, timeout, overwrite, expected_sha256)
+
+    monkeypatch.setattr(module, "fetch", spy)
+    result = module.fetch_dataset(
+        "fixture", "https://example.invalid/x", staged,
+        expected_sha256=WRONG, accept_upstream_change=True,
+    )
+    assert result.sha256 == DIGEST
+    # First attempt pinned to the registry value, retry pinned to what was found.
+    assert calls == [WRONG, DIGEST]
 
 
 def test_the_pinned_value_is_not_rewritten_by_a_fetch(staged):
