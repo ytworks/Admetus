@@ -118,6 +118,8 @@ def train_command(
                     "primary": model.test_metrics["primary"],
                     "n_features": model.basis.n_cols,
                     "feature_set": model.spec.feature_set,
+                    # Biased by construction; it ranks candidates and is not performance.
+                    "pooled_oof_score": model.cv_record["pooled_oof_score"],
                     "seconds": model.provenance["train_seconds"],
                 })
             except AdmetusError as exc:

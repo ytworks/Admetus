@@ -192,6 +192,7 @@ def train_endpoint(
     bootstrap_resamples: int = 2000,
     models_dir: Path | None = None,
     feature_set: str | None = None,
+    holdout: np.ndarray | None = None,
 ) -> TrainedModel:
     """Train one endpoint and evaluate it once on held-out data.
 
@@ -208,6 +209,11 @@ def train_endpoint(
         bootstrap_resamples: Resamples for the reported confidence interval.
         models_dir: Where to keep the resumable study database.
         feature_set: Override the size-derived feature set.
+        holdout: Boolean mask over ``dataset`` rows naming the evaluation set. Given,
+            it replaces the scaffold split, which is how the official benchmark
+            protocol feeds in its own published test set. ``test_fraction`` is then
+            recorded but unused. Rows whose molecule fails to featurize drop out of
+            whichever side they were on, as they do on the scaffold path.
 
     Returns:
         The :class:`TrainedModel`.
@@ -247,7 +253,26 @@ def train_endpoint(
     smiles_ok = [dataset.smiles[i] for i in featurized.positions]
 
     # --- split, then audit at the level the model can actually see ---------
-    split = splits.scaffold_split(smiles_ok, test_fraction=test_fraction)
+    if holdout is None:
+        split = splits.scaffold_split(smiles_ok, test_fraction=test_fraction)
+        split_kind = f"scaffold, {test_fraction:.0%} held out"
+    else:
+        mask = np.asarray(holdout, dtype=bool)
+        if mask.shape != (len(dataset),):
+            raise InputDataError(
+                f"{endpoint.key}: the holdout mask has shape {mask.shape}, "
+                f"but the dataset has {len(dataset)} rows"
+            )
+        # featurized.positions indexes the dataset, so the mask follows the rows
+        # that survived featurization rather than the original numbering.
+        kept = mask[featurized.positions]
+        split = splits.Split(train=np.flatnonzero(~kept), test=np.flatnonzero(kept))
+        if split.test.size == 0 or split.train.size == 0:
+            raise InputDataError(
+                f"{endpoint.key}: the given holdout leaves {split.train.size} training and "
+                f"{split.test.size} evaluation rows, so nothing can be measured"
+            )
+        split_kind = "given (published benchmark split)"
     leakage = audit.audit_split(matrix, y_published, split.train, split.test)
     train_rows = np.setdiff1d(split.train, leakage.drop_from_train, assume_unique=False)
     test_rows = split.test
@@ -398,6 +423,12 @@ def train_endpoint(
         )
 
     cv_record = dict(tune_record)
+    # Scored on the production ensemble's own out-of-fold predictions, so it is
+    # comparable across runs that differ in feature set or parameters. Biased by
+    # construction -- the folds chose the model -- and flagged as such by
+    # ``cv_score_biased``. It selects; it never reports.
+    cv_record["pooled_oof_score"] = objectives.score(pooled, y_train, endpoint.metric)
+    cv_record["pooled_oof_n"] = pooled.n_covered
     cv_record["fold_diagnostics"] = objectives.fold_diagnostics(pooled)
     cv_record["fold_report"] = splits.fold_report(fold_sets, y_train, endpoint.task)
     cv_record["deployment_rounds"] = rounds
@@ -410,7 +441,8 @@ def train_endpoint(
         "n_featurize_failures": len(featurized.failures),
         "n_train": int(train_rows.size),
         "n_test": int(test_rows.size),
-        "test_fraction": test_fraction,
+        "test_fraction": test_fraction if holdout is None else None,
+        "split": split_kind,
         "leakage_audit": leakage.to_dict(),
         "within_train_resolution": within,
         "dataset": dataset.provenance,
