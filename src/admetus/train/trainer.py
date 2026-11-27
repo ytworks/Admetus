@@ -233,7 +233,9 @@ def train_endpoint(
             "cv_score_biased": True,
             "n_trials": sum(r["n_trials"] for r in per_fold),
             "sampler_seed": seed,
-            "time_budget_seconds_per_fold": time_budget,
+            # Per fold, not for the endpoint: every fold gets the whole budget, so
+            # the tuning wall clock is this times `n_folds`.
+            "time_budget_seconds": time_budget,
             "search_space_owner": "tuner",
             "feature_fraction_grid_floor": 0.4,
         }

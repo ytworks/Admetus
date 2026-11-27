@@ -103,7 +103,8 @@ class TuneResult:
             "best_cv_score": self.score,
             "n_trials": self.n_trials,
             "sampler_seed": self.seed,
-            "time_budget_seconds_per_fold": self.time_budget,
+            # This record describes ONE fold, so the budget is this fold's.
+            "time_budget_seconds": self.time_budget,
             # The tuner selects on the very rows it early-stops against, so this
             # score is optimistic as well as being a selection score. Reported
             # numbers come from the held-out 20%.
