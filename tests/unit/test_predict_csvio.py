@@ -246,3 +246,35 @@ def test_one_feature_space_gives_one_group():
     groups = spec_groups([Fake("morgan_p2"), Fake("morgan_p2")])
     assert len(groups) == 1
     assert groups[0].positions == (0, 1)
+
+
+def test_a_short_row_is_padded_so_the_columns_line_up(tmp_path):
+    """`pad` has to pad, or the appended columns land in the row's missing fields.
+
+    With the header `id,smiles,note` and the row `1,CCO`, the prediction used to be
+    written into `note` and its ensemble spread into the prediction's own column.
+    Reading the output by header name gave confident wrong numbers, and the run
+    exited 0.
+    """
+    from admetus.predict.csvio import RaggedPolicy, Record
+
+    policy = RaggedPolicy("pad")
+    record = Record(number=2, fields=["1", "CCO"], body="1,CCO", terminator="\n")
+    assert policy.check(record, 3, tmp_path / "in.csv") == 1
+    assert policy.n_short == 1
+
+    full = Record(number=3, fields=["1", "CCO", "x"], body="1,CCO,x", terminator="\n")
+    assert policy.check(full, 3, tmp_path / "in.csv") == 0
+
+
+def test_a_row_with_surplus_fields_is_refused_under_every_policy(tmp_path):
+    """Padding cannot fix a row that is already past the header's last column."""
+    from admetus.errors import InputDataError
+    from admetus.predict.csvio import RaggedPolicy, Record
+
+    record = Record(number=2, fields=["1", "CCO", "extra"], body="1,CCO,extra", terminator="\n")
+    for mode in ("pad", "error"):
+        policy = RaggedPolicy(mode)
+        with pytest.raises(InputDataError, match="sit where the prediction columns would go"):
+            policy.check(record, 2, tmp_path / "in.csv")
+        assert policy.n_surplus == 1

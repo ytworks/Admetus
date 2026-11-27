@@ -293,8 +293,9 @@ def run(
         out.write(header, resolved)
 
         for chunk in _chunks(records, options.chunk_size):
-            for record in chunk:
-                ragged.check(record, n_header, source)
+            # How many empty fields each row needs before the appended columns,
+            # so a short row's prediction lands in the column the header names.
+            padding = [ragged.check(record, n_header, source) for record in chunk]
             report.n_rows += len(chunk)
 
             raw = [
@@ -389,6 +390,7 @@ def run(
 
             for position, record in enumerate(chunk):
                 text = raw[position]
+                pad = [EMPTY] * padding[position]
                 entry = memo.get(text)
                 if entry is None:
                     cells, reason = list(blank), "molecule was evicted from the cache"
@@ -401,7 +403,7 @@ def run(
                             f"stopped after {report.n_failed} failed molecule(s), over the "
                             f"--max-failures limit of {options.max_failures}"
                         )
-                out.write(record, [*cells, reason or EMPTY])
+                out.write(record, [*pad, *cells, reason or EMPTY])
 
             if not progress_disabled():
                 log.info("processed %d row(s)", report.n_rows)

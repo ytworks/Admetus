@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import io
 import json
+import re
+import shutil
 import tarfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -252,17 +254,65 @@ def read_manifest(source: str, directory: Path) -> tuple[dict[str, Any], str]:
     return manifest, base
 
 
+#: An endpoint key as the registry spells one: lowercase, digits, underscores. The
+#: manifest comes off the network and its keys name directories, so the shape is
+#: checked rather than trusted.
+ENDPOINT_KEY = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
+def _checked_endpoint(value: Any) -> str:
+    """Return a manifest endpoint key, or refuse it.
+
+    The key becomes a directory name under the models directory, so a key like
+    ``../../etc`` would write outside it. Refusing the shape is cheaper and more
+    obvious than normalizing and then hoping the containment check catches it.
+    """
+    if not isinstance(value, str) or not ENDPOINT_KEY.match(value):
+        raise NetworkError(
+            f"the manifest names an endpoint {value!r} that is not a usable key. "
+            "A key is lowercase letters, digits and underscores."
+        )
+    return value
+
+
+def _checked_archive(value: Any, endpoint: str) -> str:
+    """Return a manifest archive filename, or refuse it.
+
+    A bare filename, nothing else: the name is joined to a download directory and to
+    the release's base URL, and a path in it would reach outside either.
+    """
+    if not isinstance(value, str) or not value or value != Path(value).name:
+        raise NetworkError(
+            f"the manifest gives {endpoint} an archive {value!r} that is not a plain filename"
+        )
+    if value in (".", "..") or value.startswith("."):
+        raise NetworkError(f"the manifest gives {endpoint} an archive name that is not usable: {value!r}")
+    return value
+
+
+def _contained(path: Path, root: Path, what: str) -> Path:
+    """Return ``path`` resolved, having checked it stays under ``root``."""
+    root = Path(root).resolve()
+    resolved = (root / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
+    if resolved != root and root not in resolved.parents:
+        raise NetworkError(f"{what} would land outside {root}: {resolved}")
+    return resolved
+
+
 def _unpack(archive: Path, models_dir: Path, endpoint: str) -> Path:
-    """Unpack one archive into the models directory.
+    """Unpack one archive to a staging directory beside the bundle it would replace.
 
     Member paths come off the network, so each one is checked before anything is
     written: every entry must be a regular file directly under ``<endpoint>/``.
+
+    The staging directory is returned rather than moved into place. Replacing a
+    working bundle before the incoming one has been verified loses the working copy
+    when the incoming one turns out not to load here, which is exactly when the old
+    one is most wanted.
     """
     models_dir = Path(models_dir)
     staging = models_dir / f".{endpoint}.incoming"
     if staging.exists():
-        import shutil
-
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
 
@@ -281,13 +331,7 @@ def _unpack(archive: Path, models_dir: Path, endpoint: str) -> Path:
             member.name = path.parts[1]
             tar.extract(member, staging, filter="data")
 
-    target = models_dir / endpoint
-    if target.exists():
-        import shutil
-
-        shutil.rmtree(target)
-    staging.replace(target)
-    return target
+    return staging
 
 
 def install(
@@ -311,10 +355,19 @@ def install(
     Returns:
         One record per endpoint, saying what happened and why.
     """
+    # Every name the manifest supplies is checked before anything is written or
+    # removed, because these names become directories under the models directory and
+    # files under the download directory.
+    bundles = []
+    for entry in manifest["bundles"]:
+        endpoint = _checked_endpoint(entry.get("endpoint"))
+        bundles.append({**entry, "endpoint": endpoint,
+                        "archive": _checked_archive(entry.get("archive"), endpoint)})
+
     wanted = set(keys) if keys else None
-    entries = [b for b in manifest["bundles"] if wanted is None or b["endpoint"] in wanted]
+    entries = [b for b in bundles if wanted is None or b["endpoint"] in wanted]
     if wanted:
-        missing = sorted(wanted - {b["endpoint"] for b in manifest["bundles"]})
+        missing = sorted(wanted - {b["endpoint"] for b in bundles})
         if missing:
             raise ModelError(
                 f"the manifest has no bundle for {', '.join(missing)}. It publishes "
@@ -328,15 +381,21 @@ def install(
 
     for entry in entries:
         endpoint = entry["endpoint"]
-        target = models_dir / endpoint
+        target = Path(_contained(Path(endpoint), models_dir, f"the bundle directory for {endpoint}"))
         if target.is_dir() and not overwrite:
-            ok, _ = verify(target, check_fingerprint=False)
+            # The fingerprint is part of the test here, not just the file list. It
+            # used to be skipped, so after a failed --overwrite a retry without the
+            # flag reported "already present" for a bundle that does not work on
+            # this install -- the one case where saying nothing is worst.
+            ok, _ = verify(target, check_fingerprint=True)
             if ok:
                 out.append({"endpoint": endpoint, "installed": False, "reason": "already present"})
                 continue
 
         source = f"{base}/{entry['archive']}"
-        archive = cache_dir / entry["archive"]
+        archive = Path(
+            _contained(Path(entry["archive"]), cache_dir, f"the download for {endpoint}")
+        )
         try:
             if source.startswith(("http://", "https://")):
                 fetch(source, archive, overwrite=True, expected_sha256=entry["archive_sha256"])
@@ -348,22 +407,41 @@ def install(
                         f"{local} does not match the digest the manifest records for it"
                     )
                 archive = local
-            path = _unpack(archive, models_dir, endpoint)
+            staging = _unpack(archive, models_dir, endpoint)
         except (NetworkError, OSError) as exc:
             out.append({"endpoint": endpoint, "installed": False, "reason": str(exc), "ok": False})
             continue
 
-        ok, problems = verify(path, check_fingerprint=True)
+        # Verified at the staging path, so a candidate that does not load here never
+        # displaces a bundle that does.
+        ok, problems = verify(staging, check_fingerprint=True)
+        if not ok:
+            shutil.rmtree(staging, ignore_errors=True)
+            log.error("%s does not verify here, so it was not installed: %s", endpoint, "; ".join(problems))
+            out.append({
+                "endpoint": endpoint,
+                "installed": False,
+                "ok": False,
+                "problems": problems,
+                "reason": (
+                    "the published bundle does not verify on this install, so nothing was "
+                    "replaced" if target.is_dir() else
+                    "the published bundle does not verify on this install"
+                ),
+            })
+            continue
+
+        if target.exists():
+            shutil.rmtree(target)
+        staging.replace(target)
         out.append({
             "endpoint": endpoint,
             "installed": True,
-            "path": str(path),
-            "ok": ok,
-            "problems": problems,
-            "reason": "installed" if ok else "installed but does not verify here",
+            "path": str(target),
+            "ok": True,
+            "problems": [],
+            "reason": "installed",
         })
-        if not ok:
-            log.error("%s installed but does not verify: %s", endpoint, "; ".join(problems))
     return out
 
 

@@ -286,22 +286,51 @@ class RaggedPolicy:
 
     mode: str = "error"
     seen: int = field(default=0)
+    n_short: int = field(default=0)
+    n_surplus: int = field(default=0)
 
-    def check(self, record: Record, n_header: int, path: Path) -> None:
-        """Raise or count, depending on the policy.
+    def check(self, record: Record, n_header: int, path: Path) -> int:
+        """Raise, or return how many empty fields to insert before the new columns.
+
+        ``pad`` used only to count, which left the appended columns shifted into the
+        row's missing fields: with the header ``id,smiles,note`` and the row
+        ``1,CCO``, the prediction landed in ``note`` and its ensemble spread landed
+        in the prediction's own column. Reading the output by header name then gave
+        confident wrong numbers, and the run still exited 0.
+
+        A short row is therefore padded for real, which the mode's name has always
+        promised. A row with *surplus* fields cannot be fixed by padding -- the
+        extra fields are already past the header's last column -- so it is reported
+        whatever the mode, because silently appending after them would put the
+        prediction columns at a different offset than the header says.
+
+        Returns:
+            How many empty fields to insert before the appended columns.
 
         Raises:
-            InputDataError: The record is ragged and the policy is ``error``.
+            InputDataError: The record is ragged and the policy is ``error``, or it
+                carries more fields than the header under any policy.
         """
-        if len(record.fields) == n_header:
-            return
+        n_fields = len(record.fields)
+        if n_fields == n_header:
+            return 0
         self.seen += 1
+        if n_fields > n_header:
+            self.n_surplus += 1
+            raise InputDataError(
+                f"{path.name} line {record.number} has {n_fields} field(s) but the header has "
+                f"{n_header}. The extra field(s) sit where the prediction columns would go, so "
+                "the output could not be read by header name. Fix the row, or drop the surplus "
+                "field(s) before predicting."
+            )
+        self.n_short += 1
         if self.mode == "error":
             raise InputDataError(
-                f"{path.name} line {record.number} has {len(record.fields)} field(s) but the "
+                f"{path.name} line {record.number} has {n_fields} field(s) but the "
                 f"header has {n_header}. Appending columns to a ragged row would misalign them. "
                 "Pass --on-ragged pad to append anyway."
             )
+        return n_header - n_fields
 
 
 __all__ = [

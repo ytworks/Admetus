@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
@@ -21,8 +22,13 @@ from admetus.cli.options import (
     write_report,
 )
 from admetus.data.registry import resolve_keys
-from admetus.errors import EXIT_PARTIAL_FAILURE, ModelError
+from admetus.errors import EXIT_PARTIAL_FAILURE, ModelError, UsageError
 from admetus.predict import runner
+
+#: Rows that `--json` will carry inline. A JSON document holding a ten-million-row
+#: CSV is not a useful object, so a larger run is told to write a file instead of
+#: being silently truncated.
+MAX_JSON_ROWS = 10_000
 
 
 @click.command("predict")
@@ -122,8 +128,6 @@ def predict_command(
         input_path = source
         if inline:
             if source is not None:
-                from admetus.errors import UsageError
-
                 raise UsageError("pass either -i/--input or --smiles, not both")
             fd, name = tempfile.mkstemp(suffix=".csv")
             temporary = Path(name)
@@ -152,28 +156,92 @@ def predict_command(
             encoding=encoding,
         )
 
+        # `--json` has to produce one JSON document. It used to write the CSV to
+        # standard output and then the report after it, so json.loads(stdout) failed
+        # on the first character and the report alone carried no predictions. With
+        # no -o, the CSV is written to a temporary file and its rows go into the
+        # document; with -o, the file gets the CSV and standard output the report.
+        inline_json = as_json and destination is None
+        out_path = destination
+        json_csv: Path | None = None
+        if inline_json:
+            fd, name = tempfile.mkstemp(suffix=".csv")
+            os.close(fd)
+            json_csv = Path(name)
+            out_path = json_csv
+
         report = None
         try:
-            report = runner.run(input_path, destination, models, options)
+            report = runner.run(input_path, out_path, models, options)
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
             if report is not None:
-                write_report(report_path, _report_payload(report, models, input_path, destination))
+                write_report(
+                    report_path,
+                    _report_payload(report, models, input_path, out_path if not inline_json else None),
+                )
 
-        payload = _report_payload(report, models, input_path, destination)
+        payload = _report_payload(report, models, input_path, out_path if not inline_json else None)
+        if inline_json:
+            try:
+                if report.n_rows > MAX_JSON_ROWS:
+                    raise UsageError(
+                        f"{report.n_rows} rows is too many to return inline as JSON (the limit is "
+                        f"{MAX_JSON_ROWS}). Pass -o/--output to write the CSV, and --json then "
+                        "prints the report alone."
+                    )
+                payload["predictions"] = _rows_from_csv(json_csv, report, options)
+            finally:
+                json_csv.unlink(missing_ok=True)
         if as_json:
             emit(payload)
-        elif destination is not None:
+        elif out_path is not None:
             click.echo(
                 f"{report.n_rows} row(s), {report.n_featurized} distinct molecule(s), "
-                f"{report.n_failed} failed -> {destination}",
+                f"{report.n_failed} failed -> {out_path}",
                 err=True,
             )
         if strict and report.n_failed:
             raise SystemExit(EXIT_PARTIAL_FAILURE)
 
     run_guarded(body, as_json=as_json)
+
+
+def _coerce(value: str):
+    """Type one generated cell for JSON: empty is null, the flag is a boolean.
+
+    Only the columns this run added are typed. A passthrough column stays the exact
+    string it was, because reformatting someone's data is the one thing the CSV path
+    promises not to do.
+    """
+    if value == "":
+        return None
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def _rows_from_csv(path: Path, report, options: runner.Options) -> list[dict]:
+    """Read the written CSV back as JSON rows."""
+    from admetus.predict import csvio
+
+    dialect = csvio.sniff(path, encoding=options.encoding, sep=options.sep)
+    records = csvio.read_records(path, dialect)
+    header = next(records).fields
+    added = set(report.added_columns)
+    rows: list[dict] = []
+    for record in records:
+        rows.append({
+            name: (_coerce(value) if name in added else value)
+            for name, value in zip(header, record.fields)
+        })
+    return rows
 
 
 def _report_payload(report, models, source, destination) -> dict:

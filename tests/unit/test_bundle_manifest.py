@@ -21,11 +21,13 @@ from admetus.bundle import manifest as mf
 from admetus.errors import ModelError, NetworkError
 
 
-def make_bundle(models_dir, key="fixture", n_boosters=1):
-    """Write a directory that passes ``verify(check_fingerprint=False)``."""
+def make_bundle(models_dir, key="fixture", n_boosters=1, golden=None):
+    """Write a directory that verifies, fingerprint included unless told otherwise."""
+    from admetus.bundle.save import golden_fingerprint
     from admetus.chem.spec import get_spec
 
     spec = get_spec("morgan")
+    golden = golden_fingerprint(spec) if golden is None else golden
     directory = models_dir / key
     directory.mkdir(parents=True)
     kept = np.asarray([1, 5, 9, 17], dtype=np.int32)
@@ -54,7 +56,7 @@ def make_bundle(models_dir, key="fixture", n_boosters=1):
                     "column_sha256": spec.column_sha256(kept),
                     "n_raw_features": spec.n_features,
                     "n_features": int(kept.size),
-                    "golden_fingerprint": "deadbeef",
+                    "golden_fingerprint": golden,
                 },
                 "model": {"n_boosters": n_boosters, "num_boost_round": 10, "params": {}},
                 "metrics": {"primary": {"value": 0.9, "ci_low": 0.8, "ci_high": 0.95, "n": 50}},
@@ -130,14 +132,11 @@ def test_install_round_trips_the_bundle(tmp_path):
     results = mf.install(manifest, base, tmp_path / "installed", tmp_path / "cache")
 
     assert [r["installed"] for r in results] == [True]
+    assert results[0]["ok"] is True
     installed = tmp_path / "installed" / "fixture"
     assert sorted(p.name for p in installed.iterdir()) == [
         "ad_reference.npz", "bundle.json", "columns.npz", "fold_0.txt"
     ]
-    # The golden fingerprint of the fixture is nonsense on purpose, so a real
-    # install reports the mismatch rather than hiding it.
-    assert results[0]["ok"] is False
-    assert any("fingerprint" in problem for problem in results[0]["problems"])
 
 
 def test_an_already_installed_bundle_is_left_alone(tmp_path):
@@ -214,3 +213,90 @@ def test_asking_the_manifest_for_an_endpoint_it_lacks_is_refused(tmp_path):
     manifest, base = mf.read_manifest(str(tmp_path / "dist"), tmp_path / "cache")
     with pytest.raises(ModelError, match="no bundle for dili"):
         mf.install(manifest, base, tmp_path / "installed", tmp_path / "cache", keys=["dili"])
+
+
+def test_a_candidate_that_does_not_verify_never_replaces_a_working_bundle(tmp_path):
+    """The working copy is wanted most exactly when the incoming one is broken.
+
+    `models pull --overwrite` used to delete the target and then verify what it had
+    unpacked, so an incompatible bundle cost the operator a working one. Worse, the
+    retry without --overwrite then said "already present", because that check
+    skipped the fingerprint.
+    """
+    models = tmp_path / "models"
+    make_bundle(models)                      # the working copy, fingerprint and all
+    mf.build(models, tmp_path / "dist")      # a release of it
+
+    # Now publish a release whose fingerprint belongs to a different install.
+    other = tmp_path / "other"
+    make_bundle(other, golden="deadbeef")
+    mf.build(other, tmp_path / "bad")
+
+    installed = tmp_path / "installed"
+    good, base = mf.read_manifest(str(tmp_path / "dist"), tmp_path / "cache")
+    mf.install(good, base, installed, tmp_path / "cache")
+    working = (installed / "fixture" / "bundle.json").read_text()
+
+    bad, bad_base = mf.read_manifest(str(tmp_path / "bad"), tmp_path / "cache")
+    results = mf.install(bad, bad_base, installed, tmp_path / "cache", overwrite=True)
+
+    assert results[0]["installed"] is False
+    assert results[0]["ok"] is False
+    assert "nothing was replaced" in results[0]["reason"]
+    # The working bundle is untouched, and no staging directory is left behind.
+    assert (installed / "fixture" / "bundle.json").read_text() == working
+    assert not list(installed.glob(".*.incoming"))
+
+
+def test_an_existing_bundle_that_does_not_verify_here_is_not_called_present(tmp_path):
+    models = tmp_path / "models"
+    make_bundle(models)
+    mf.build(models, tmp_path / "dist")
+    manifest, base = mf.read_manifest(str(tmp_path / "dist"), tmp_path / "cache")
+
+    installed = tmp_path / "installed"
+    make_bundle(installed, golden="deadbeef")   # a local bundle from another install
+
+    results = mf.install(manifest, base, installed, tmp_path / "cache")
+
+    # Not "already present": the local copy does not work here, so the published
+    # one is installed over it.
+    assert results[0]["installed"] is True
+    assert results[0]["ok"] is True
+
+
+def test_a_manifest_endpoint_key_that_is_a_path_is_refused(tmp_path):
+    """The key becomes a directory name under the models directory."""
+    import json as _json
+
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / mf.MANIFEST_FILE).write_text(
+        _json.dumps({
+            "manifest_version": 1, "n_bundles": 1,
+            "bundles": [{"endpoint": "../../escaped", "archive": "x.tar.gz",
+                         "archive_sha256": "0" * 64, "archive_bytes": 1, "files": []}],
+        }),
+        encoding="utf-8",
+    )
+    manifest, base = mf.read_manifest(str(dist), tmp_path / "cache")
+    with pytest.raises(NetworkError, match="not a usable key"):
+        mf.install(manifest, base, tmp_path / "installed", tmp_path / "cache")
+
+
+def test_a_manifest_archive_name_that_is_a_path_is_refused(tmp_path):
+    import json as _json
+
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / mf.MANIFEST_FILE).write_text(
+        _json.dumps({
+            "manifest_version": 1, "n_bundles": 1,
+            "bundles": [{"endpoint": "fixture", "archive": "../../etc/passwd",
+                         "archive_sha256": "0" * 64, "archive_bytes": 1, "files": []}],
+        }),
+        encoding="utf-8",
+    )
+    manifest, base = mf.read_manifest(str(dist), tmp_path / "cache")
+    with pytest.raises(NetworkError, match="not a plain filename"):
+        mf.install(manifest, base, tmp_path / "installed", tmp_path / "cache")

@@ -250,7 +250,13 @@ def train_endpoint(
 
     matrix = featurized.matrix
     y_published = dataset.y[featurized.positions]
-    smiles_ok = [dataset.smiles[i] for i in featurized.positions]
+    # Scaffold grouping has to see the molecule the model sees. Grouping the input
+    # strings instead lets two rows that standardize to the same structure -- a
+    # salt and its free base, two spellings of one tautomer -- land on opposite
+    # sides of the split, which is the leak the split exists to prevent. Measured
+    # on the shipped hERG split, 9 of 129 held-out molecules shared a standardized
+    # scaffold with a surviving training row.
+    smiles_ok = list(featurized.canonical)
 
     # --- split, then audit at the level the model can actually see ---------
     if holdout is None:

@@ -145,3 +145,34 @@ def test_fold_report_describes_each_fold():
     report = fold_report(folds, y, "classification")
     assert len(report) == len(folds)
     assert all(r["n_valid_positive"] > 0 for r in report)
+
+
+def test_scaffold_grouping_must_see_the_standardized_structure():
+    """A salt and its free base must not land on opposite sides of the split.
+
+    The trainer used to group the input strings. A counterion that carries its own
+    rings then shows up in the scaffold key, so the salt groups apart from the free
+    base even though standardization collapses them to one molecule and the model
+    cannot tell them apart. On the shipped hERG split that put 9 of 129 held-out
+    molecules in a scaffold the training set also held.
+    """
+    from admetus.chem.featurizer import featurize_many
+    from admetus.chem.spec import get_spec
+
+    free_base = "CCCCN1CCCC1"
+    tosylate_salt = "CCCCN1CCCC1.c1ccc(S(=O)(=O)O)cc1"
+    raw = [free_base, tosylate_salt]
+
+    canonical = list(featurize_many(raw, get_spec("morgan")).canonical)
+    # Standardization reduces the salt to its largest fragment, so both rows are
+    # the same molecule by the time the model sees them.
+    assert canonical[0] == canonical[1]
+
+    from_raw = list(scaffold_groups(raw))
+    from_canonical = list(scaffold_groups(canonical))
+
+    # The counterion's ring leaks into the key when the input string is grouped.
+    assert from_raw[0] != from_raw[1]
+    assert "c1ccccc1" in from_raw[1]
+    # Grouping what the model sees keeps the pair together.
+    assert from_canonical[0] == from_canonical[1]
