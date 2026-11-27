@@ -4,17 +4,18 @@ Cross-session memory for Admetus: what exists, what is measured, what is not don
 and what to pick up next. Read this first, then `CLAUDE.md`.
 
 Last updated: 2026-11-27. Branch `feat/core-featurizer-and-data`, draft PR #1.
-188 tests pass locally and in CI on Ubuntu and macOS for Python 3.12 and 3.13.
+217 tests pass locally and in CI on Ubuntu and macOS for Python 3.12 and 3.13.
 
 ## State
 
-Every layer is implemented and tested. 186 tests pass, `ruff check .` is clean, and
+Every layer is implemented and tested. 217 tests pass, `ruff check .` is clean, and
 the full path works end to end on real data: fetch, train with automatic tuning,
-save, load, predict into a CSV.
+save, load, predict into a CSV. The official protocol and the release round trip
+are both implemented and exercised.
 
-**No models are published yet, and no accuracy table is filled in.** That is the
-main remaining work, and it is deliberate that the README's benchmark section is
-empty rather than estimated.
+**The accuracy tables are the remaining work.** The feature set per endpoint is
+now decided by measurement rather than by the size rule alone, and training all 29
+endpoints is what fills in the numbers. Nothing is estimated in the meantime.
 
 | Layer | State |
 |---|---|
@@ -23,34 +24,35 @@ empty rather than estimated.
 | `train/` metrics, transforms, pruning, folds, tuning, calibration, conformal, trainer | done, tested |
 | `bundle/` save and load with spec verification | done, tested |
 | `predict/` byte-preserving CSV, runner | done, tested |
-| `cli/` doctor, endpoints, data, train, evaluate, predict, models | done |
+| `cli/` doctor, endpoints, data, train, evaluate, benchmark, predict, models | done |
+| Feature set per endpoint, by measurement | done: 174 runs, 3 overrides, in `docs/benchmark.md` |
+| Official five-seed protocol on the published splits | done: `admetus benchmark fetch` and `run` |
+| Release packaging and install | done: `admetus models package` and `pull`, with a manifest of digests |
 | CI and Docker | green on the branch: lint, the README pair check, the Ubuntu and macOS test matrices for Python 3.12 and 3.13, and the Docker image with its smoke tests |
 | README in English and Japanese | done, pair check passes |
 | Trained models and accuracy numbers | **not done** |
 
 ## What to do next
 
-1. **Train everything and fill in the numbers.** `admetus data fetch --all` then
+1. **Finish training and fill in the numbers.** `admetus data fetch --all` then
    `admetus train --all --time-budget 900`. Expect hours: the tuner runs 65 to 68
    trials per endpoint and the largest datasets are 13,445 rows. `train --all`
-   skips endpoints that already have a valid bundle, so it resumes. Then put the
-   held-out metrics with their intervals into the README benchmark section of
-   **both** languages, and into `docs/benchmark.md`.
-2. **Decide the feature set per endpoint by measurement.** Section 1.1 of the plan
-   calls for running all three feature sets at a reduced budget and recording the
-   result, rather than assuming `morgan_p23` is right everywhere. Not started.
-3. **The official five-seed protocol.** `admetus evaluate` currently reports the
-   metrics recorded at training time on our own scaffold split. The benchmark
-   group's own splits are published as one archive (`admet_group`, Dataverse id
-   4426004, a 1.4 MB zip readable with `zipfile`), and
-   `download.extract_benchmark_archive` exists but nothing uses it yet. Without
-   this, our numbers are not comparable with the published leaderboard.
-4. **Publish model bundles.** The release side of section 7 is unwritten: no
-   `models pull`, no manifest, no release workflow for bundles. `admetus models`
-   currently only lists and shows what is local.
-5. **Publish model bundles** is the only structural gap left, listed above as
-   item 4. CI covers both platforms now, so nothing else is outstanding on the
-   infrastructure side.
+   skips endpoints that already have a valid bundle, so it resumes, and three
+   `--endpoint` runs in parallel with `--jobs 4` keep a 12-core machine busy.
+   Then regenerate the tables with `python scripts/benchmark_tables.py` and paste
+   them into the benchmark section of **both** READMEs. Generated, not transcribed:
+   CI compares every numeric cell of the two documents.
+2. **Run the official protocol with tuning on.** `admetus benchmark run --all`
+   works and the splits are pinned, but five seeds per endpoint means five tuning
+   runs, so the numbers recorded first were taken with `--no-tune`. They are
+   labelled as a floor, not a best effort. Re-running with a budget is the
+   remaining accuracy work after item 1.
+3. **Publish a release.** `admetus models package --out dist/models` writes the
+   archives and the manifest, and `.github/workflows/release-models.yml` verifies
+   that a tagged release installs from scratch. Nothing has been uploaded yet, so
+   `admetus models pull` reports a download failure until a release exists. That
+   step is deliberately a person's decision, not a script's: it publishes bytes
+   under the project's name.
 
 ## Decisions worth not relitigating
 
@@ -80,6 +82,18 @@ Each of these was measured, and several contradict what the plan originally said
   `Dataset`, and reuse gives bit-identical predictions. The per-trial rebuild the
   plan called for is unnecessary. Moot on the tuning path anyway, since the tuner
   manages `feature_pre_filter` itself.
+- **Most of the pharmacophore value is in the 2-point block.** Measured over all 29
+  endpoints: the 324-bit 2-point block closes most of the gap from plain Morgan, and
+  the 87,480-bit 3-point block adds a further 0.01 or less almost everywhere. The
+  size rule survived at 26 of 29 endpoints; the three overrides are in
+  `endpoints.yaml` with their margins. `tox21_nr_ar` is the one endpoint where the
+  pharmacophore blocks measurably **hurt** -- 0.5074 against 0.4834 average
+  precision -- because at 4.3% positive its 310 actives cannot pay for 89,852
+  columns.
+- **A feature set is chosen on the cross-validation score, never the held-out set.**
+  Choosing against held-out data would turn the reported number into a selection
+  score. The study therefore ranks on pooled out-of-fold predictions and runs two
+  seeds, so a challenger has to beat the default by more than the fold noise.
 - **The automatic tuner owns the search space**, by instruction. Two costs are
   real and recorded in every bundle: its `feature_fraction` grid starts at 0.4,
   and it sets `feature_pre_filter` to `False`. The explicit prevalence pruning is
@@ -118,6 +132,12 @@ Changing any of these is a behaviour change, not a cleanup.
   against noise.
 
 ## Verified by hand on real data
+
+- The published split archive fetches, verifies against its pin and unpacks all 22
+  official endpoints; `dili` on the published split scores AUROC 0.9037 +/- 0.0046
+  over two untuned seeds, against a leaderboard best near 0.925.
+- `models package` then `models pull` round-trips a bundle through a manifest, and
+  packaging the same bundle twice gives byte-identical archives.
 
 - DILI: 68 tuner trials, held-out AUROC 0.8338 [0.7491, 0.9133] on 95 compounds.
 - VDss: held-out Spearman 0.6037 [0.5080, 0.6818], and the conformal interval
