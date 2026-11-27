@@ -279,24 +279,78 @@ Three things worth knowing before reading several columns together:
 
 ## Benchmark
 
-**No accuracy numbers here right now, on purpose.** The split changed: a scaffold-grouped
-holdout was replaced by the reference implementation's random 20% holdout with folds over the
-rest, so every number measured before it describes a pipeline this code no longer is. They were
-deleted rather than relabelled, and all 29 endpoints are being retrained.
+Every number below was measured by a run this repository can reproduce. None is an estimate,
+and no gap is filled.
 
-What will go here, once that finishes:
+### Held out, on the random 20%
 
-- **Held-out**, on the random 20%, with a bootstrap interval.
-- **Official protocol**, on the benchmark group's published split, mean and standard deviation
-  over its five seeds, for the 22 endpoints that have one.
+The split is the reference implementation's: `train_test_split(test_size=0.2, random_state=0)`,
+then 3 folds over the training portion. The held-out fifth is scored once, after training, with
+2,000 bootstrap resamples for the interval. Nothing selects against it -- not a hyperparameter,
+not a feature space -- and the cross-validation scores that did the selecting are recorded in
+each bundle, labelled biased, and quoted nowhere.
 
-Regenerate both with `python scripts/benchmark_tables.py`, which reads the bundles rather than
-being typed into: the two READMEs have to carry the same numbers and CI compares every numeric
-cell.
+| Endpoint | Task | Metric | Held-out | 95% CI | n |
+|---|---|---|---|---|---|
+| `caco2` | regression | mae | 0.3042 | [0.2673, 0.3426] | 182 |
+| `pampa` | classification | auroc | 0.7550 | [0.6867, 0.8244] | 407 |
+| `hia` | classification | auroc | 0.9948 | [0.9809, 1.0000] | 116 |
+| `pgp` | classification | auroc | 0.9468 | [0.9172, 0.9724] | 244 |
+| `bioavailability` | classification | auroc | 0.7549 | [0.6330, 0.8680] | 128 |
+| `lipophilicity` | regression | mae | 0.5167 | [0.4853, 0.5478] | 840 |
+| `solubility` | regression | mae | 0.7797 | [0.7442, 0.8171] | 1996 |
+| `bbb` | classification | auroc | 0.9244 | [0.8900, 0.9551] | 408 |
+| `ppbr` | regression | mae | 8.2552 | [7.2838, 9.3094] | 323 |
+| `vdss` | regression | spearman | 0.3051 | [0.1762, 0.4290] | 226 |
+| `cyp2c9_veith` | classification | auprc | 0.8362 | [0.8108, 0.8606] | 2419 |
+| `cyp2d6_veith` | classification | auprc | 0.7587 | [0.7210, 0.7953] | 2626 |
+| `cyp3a4_veith` | classification | auprc | 0.8791 | [0.8614, 0.8963] | 2466 |
+| `cyp1a2_veith` | classification | auprc | 0.9318 | [0.9207, 0.9426] | 2516 |
+| `cyp2c19_veith` | classification | auprc | 0.8758 | [0.8570, 0.8940] | 2533 |
+| `cyp2c9_substrate` | classification | auprc | 0.3871 | [0.2440, 0.5763] | 134 |
+| `cyp2d6_substrate` | classification | auprc | 0.5282 | [0.3830, 0.6996] | 134 |
+| `cyp3a4_substrate` | classification | auroc | 0.6455 | [0.5495, 0.7342] | 134 |
+| `half_life` | regression | spearman | 0.4355 | [0.2826, 0.5668] | 134 |
+| `clearance_hepatocyte` | regression | spearman | 0.4269 | [0.3136, 0.5283] | 243 |
+| `clearance_microsome` | regression | spearman | 0.6278 | [0.5430, 0.6984] | 221 |
+| `ld50` | regression | mae | 0.4391 | [0.4197, 0.4590] | 1477 |
+| `herg` | classification | auroc | 0.8667 | [0.7965, 0.9270] | 131 |
+| `herg_karim` | classification | auroc | 0.9240 | [0.9137, 0.9334] | 2689 |
+| `ames` | classification | auroc | 0.9027 | [0.8872, 0.9177] | 1456 |
+| `dili` | classification | auroc | 0.8793 | [0.7920, 0.9465] | 95 |
+| `carcinogens` | classification | auprc | 0.8164 | [0.5499, 0.9753] | 56 |
+| `skin_reaction` | classification | auroc | 0.7778 | [0.6567, 0.8874] | 81 |
+| `tox21_nr_ar` | classification | auprc | 0.5257 | [0.4111, 0.6287] | 1452 |
 
-The feature-set study behind the per-endpoint choices and the engineering measurements are in
-[docs/benchmark.md](docs/benchmark.md) and are unaffected by the split change, except where they
-quote accuracy.
+Trained with `admetus train --all --time-budget 240`, which is 240 seconds of tuning per fold,
+so 12 minutes per endpoint. Reproduce one row with
+`admetus train --endpoint dili --time-budget 240` and read it back with `admetus evaluate`.
+
+### Official protocol
+
+The 22 endpoints of the TDC ADMET benchmark group, trained on each dataset's own published
+`train_val` split and scored on its published `test` split, five seeds, aggregated the way the
+leaderboard aggregates. **Running now** -- this table is filled from the run's report, not from
+an estimate, so it stays absent until the run finishes.
+
+Regenerate both tables with `python scripts/benchmark_tables.py --models-dir models`, which reads
+the bundles rather than being typed into: the two READMEs have to carry the same numbers and CI
+compares every numeric cell.
+
+### How to read these
+
+- A dataset under 600 rows carries `low_confidence` in its record, and its interval shows why:
+  `carcinogens` is 0.8164 with a 95% interval from 0.5499 to 0.9753 over 56 test rows.
+- `cyp2c9_substrate` and `cyp2d6_substrate` are AUPRC on 134 rows with few positives; read the
+  interval, not the point.
+- The held-out column is a held-out-**row** score, not a held-out-molecule score. Nothing is
+  deduplicated, so a molecule published twice can sit on both sides: 26 of Caco-2's 182 test
+  rows share a feature vector with a training row.
+- A cross-validation score is not performance. Out-of-fold flattered the model at 26 of the 29
+  endpoints, by a median of 0.045.
+
+The engineering measurements -- throughput, memory, what each removed stage cost -- are in
+[docs/benchmark.md](docs/benchmark.md).
 
 ## Configuration
 

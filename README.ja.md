@@ -271,22 +271,76 @@ admetus models pull --all
 
 ## ベンチマーク
 
-**現在ここに精度の数値はありません。意図的です。** 分割を変更したためです。scaffold group による
-ホールドアウトを、参照実装どおりのランダム 20% ホールドアウト＋残りでの fold 分割に置き換えたので、
-それ以前に測った数値はいずれも、このコードがもう持っていないパイプラインを説明するものになりました。
-ラベルを付け替えるのではなく削除し、29 エンドポイントすべてを再学習中です。
+以下の数値はすべて、このリポジトリで再現できる実行で測ったものです。推定値はひとつもなく、
+空欄を埋めてもいません。
 
-完了後にここへ入るもの:
+### ホールドアウト（ランダム 20%）
 
-- **ホールドアウト**（ランダム 20%）、ブートストラップ区間付き。
-- **公式プロトコル**（ベンチマークグループの公開分割）、5 シードの平均と標準偏差。対象は公開分割が
-  存在する 22 エンドポイント。
+分割は参照実装のものです。`train_test_split(test_size=0.2, random_state=0)` の後、学習側を
+3 fold に分けます。ホールドアウトした 5 分の 1 は学習後に 1 度だけ採点し、区間はブートストラップ
+2,000 回で求めます。ここに対して選択は一切行いません（ハイパーパラメータも特徴量空間も）。
+選択に使った交差検証スコアは各バンドルに「biased」と明記して記録してあり、どこにも引用しません。
 
-どちらも `python scripts/benchmark_tables.py` で再生成します。バンドルから読み出すので手打ちしません。
-2 つの README は同じ数値を持つ必要があり、CI が数値セルを全件比較します。
+| Endpoint | Task | Metric | Held-out | 95% CI | n |
+|---|---|---|---|---|---|
+| `caco2` | regression | mae | 0.3042 | [0.2673, 0.3426] | 182 |
+| `pampa` | classification | auroc | 0.7550 | [0.6867, 0.8244] | 407 |
+| `hia` | classification | auroc | 0.9948 | [0.9809, 1.0000] | 116 |
+| `pgp` | classification | auroc | 0.9468 | [0.9172, 0.9724] | 244 |
+| `bioavailability` | classification | auroc | 0.7549 | [0.6330, 0.8680] | 128 |
+| `lipophilicity` | regression | mae | 0.5167 | [0.4853, 0.5478] | 840 |
+| `solubility` | regression | mae | 0.7797 | [0.7442, 0.8171] | 1996 |
+| `bbb` | classification | auroc | 0.9244 | [0.8900, 0.9551] | 408 |
+| `ppbr` | regression | mae | 8.2552 | [7.2838, 9.3094] | 323 |
+| `vdss` | regression | spearman | 0.3051 | [0.1762, 0.4290] | 226 |
+| `cyp2c9_veith` | classification | auprc | 0.8362 | [0.8108, 0.8606] | 2419 |
+| `cyp2d6_veith` | classification | auprc | 0.7587 | [0.7210, 0.7953] | 2626 |
+| `cyp3a4_veith` | classification | auprc | 0.8791 | [0.8614, 0.8963] | 2466 |
+| `cyp1a2_veith` | classification | auprc | 0.9318 | [0.9207, 0.9426] | 2516 |
+| `cyp2c19_veith` | classification | auprc | 0.8758 | [0.8570, 0.8940] | 2533 |
+| `cyp2c9_substrate` | classification | auprc | 0.3871 | [0.2440, 0.5763] | 134 |
+| `cyp2d6_substrate` | classification | auprc | 0.5282 | [0.3830, 0.6996] | 134 |
+| `cyp3a4_substrate` | classification | auroc | 0.6455 | [0.5495, 0.7342] | 134 |
+| `half_life` | regression | spearman | 0.4355 | [0.2826, 0.5668] | 134 |
+| `clearance_hepatocyte` | regression | spearman | 0.4269 | [0.3136, 0.5283] | 243 |
+| `clearance_microsome` | regression | spearman | 0.6278 | [0.5430, 0.6984] | 221 |
+| `ld50` | regression | mae | 0.4391 | [0.4197, 0.4590] | 1477 |
+| `herg` | classification | auroc | 0.8667 | [0.7965, 0.9270] | 131 |
+| `herg_karim` | classification | auroc | 0.9240 | [0.9137, 0.9334] | 2689 |
+| `ames` | classification | auroc | 0.9027 | [0.8872, 0.9177] | 1456 |
+| `dili` | classification | auroc | 0.8793 | [0.7920, 0.9465] | 95 |
+| `carcinogens` | classification | auprc | 0.8164 | [0.5499, 0.9753] | 56 |
+| `skin_reaction` | classification | auroc | 0.7778 | [0.6567, 0.8874] | 81 |
+| `tox21_nr_ar` | classification | auprc | 0.5257 | [0.4111, 0.6287] | 1452 |
 
-エンドポイントごとの選択の根拠となった特徴量セットの実測と、エンジニアリング面の測定値は
-[docs/benchmark.md](docs/benchmark.md) にあり、精度を引用している箇所を除き分割変更の影響を受けません。
+学習は `admetus train --all --time-budget 240`、すなわち fold あたり 240 秒のチューニングで、
+エンドポイントあたり 12 分です。1 行の再現は `admetus train --endpoint dili --time-budget 240`、
+読み出しは `admetus evaluate` です。
+
+### 公式プロトコル
+
+TDC ADMET ベンチマークグループの 22 エンドポイントを、各データセットが公開している `train_val`
+分割で学習し、公開 `test` 分割で採点します。5 シードで、リーダーボードと同じ集計です。
+**現在実行中**です。この表は実行のレポートから生成するもので、推定では埋めないため、完了まで
+空のままにしてあります。
+
+どちらの表も `python scripts/benchmark_tables.py --models-dir models` で再生成します。バンドルから
+読み出すので手打ちしません。2 つの README は同じ数値を持つ必要があり、CI が数値セルを全件比較します。
+
+### 読み方
+
+- 600 行未満のデータセットは記録に `low_confidence` が付き、区間がその理由を示します。
+  `carcinogens` は 56 行のテストで 0.8164、95% 区間は 0.5499〜0.9753 です。
+- `cyp2c9_substrate` と `cyp2d6_substrate` は 134 行・陽性少数での AUPRC です。点推定ではなく
+  区間を読んでください。
+- ホールドアウト列は「行」のホールドアウトスコアであり、「分子」のホールドアウトではありません。
+  重複除去をしないので、2 回公開された分子は両側に入り得ます。Caco-2 のテスト 182 行のうち
+  26 行は、学習行と同じ特徴量ベクトルを持ちます。
+- 交差検証スコアは性能ではありません。29 エンドポイントのうち 26 で out-of-fold はモデルを
+  実際より良く見せ、中央値で 0.045 の差がありました。
+
+スループット・メモリ・削除した各段の代償といったエンジニアリング面の測定値は
+[docs/benchmark.md](docs/benchmark.md) にあります。
 
 ## 設定
 
