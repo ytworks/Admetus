@@ -63,19 +63,17 @@ assays.
 3. **Hold out 20% at random**, seeded, and split the rest into folds. One model per fold,
    each stopping early on its own validation rows; the ensemble is their mean and the spread
    across them is reported beside the prediction.
-4. **Audit the split at the level the model can see.** Both fingerprint blocks are blind to
-   stereochemistry, so a pair of enantiomers is one molecule as far as the model is concerned.
-   Rows are hashed by feature vector and offending *training* rows dropped; held-out rows are kept,
-   so the metric stays measured on the same compounds as the published benchmark.
-5. **Prune columns.** Columns set in too few or too many training molecules are dropped. The band
-   is a prevalence rather than a count, because a fixed count means "1.8% of molecules" on the
-   smallest dataset and "0.04%" on the largest.
-6. **Tune, then keep the fold models.** Hyperparameters come from the automatic tuner, and the
-   models that ship are the fold models themselves -- each early-stopped on its own validation
-   rows, as the reference implementation does. Their out-of-fold predictions are therefore
-   optimistic on top of being a selection score, which is why nothing is reported from them.
-7. **Calibrate and measure.** Out-of-fold predictions give the probability calibration and the
-   recommended decision threshold. The held-out 20% is looked at exactly once.
+4. **Tune and fit each fold on its own.** The automatic tuner is run once per fold, with that
+   fold's validation rows as the watchlist, and the booster it settles on is the ensemble member.
+   So the folds end up with different parameters, and the trial count is per fold.
+5. **Measure once.** The held-out 20% is scored exactly once, with the endpoint's own metric and
+   a bootstrap interval.
+
+Nothing else happens to the data on the way. There is no standardization, no duplicate
+collapsing, no label transform, no output clamp, no column pruning and no probability
+calibration: the label is the published one, and LightGBM gets the whole 89,852-column vector.
+Each of those was tried here and removed -- several of them measurably harmful, one of them
+badly so. `docs/benchmark.md` records what each cost.
 
 ## Requirements
 
@@ -234,7 +232,7 @@ Three columns per endpoint by default, appended at the end of the row.
 
 | Column | Meaning |
 |---|---|
-| `<key>` | The prediction. A calibrated probability of the positive class for classification, or a value on the published scale for regression |
+| `<key>` | The prediction: the mean across the fold models. LightGBM's own probability for classification, **not** calibrated, or a value on the published scale for regression |
 | `<key>_ens_sd` | Disagreement across the fold ensemble. On a log-scale endpoint this is named `<key>_sd_log10`, because a standard deviation of log values is not a standard deviation in the published unit |
 
 One further column, `admetus_error`, carries the reason when a molecule could not be used.
@@ -300,21 +298,20 @@ quote accuracy.
 
 ## Configuration
 
-Dataset-dependent choices are computed rather than configured, so they do not have to be
-maintained in 29 places: which feature set to use, how aggressively to prune columns, and whether a
-dataset is too small for its metric to be read as a point estimate all follow from the number of
-rows.
+One feature space, for every endpoint: Morgan radius 6 over 2,048 bits concatenated with the
+2- and 3-point pharmacophore signature, 89,852 columns. There is nothing to choose and no flag
+to choose it with.
 
-Three feature sets exist, and `--feature-set` overrides the choice.
+Two things still follow from dataset size, and neither touches the feature space: how many folds
+the training portion can support, and whether a dataset is too small for its metric to be read as
+a point estimate (`low_confidence`).
 
-| Feature set | Content | Width |
+| Flag | Default | What it changes |
 |---|---|---|
-| `morgan` | Morgan radius 2, 2048 bits. The field-standard baseline | 2048 |
-| `morgan_p2` | Morgan radius 6 plus the 2-point pharmacophore signature | 2372 |
-| `morgan_p23` | Morgan radius 6 plus the 2- and 3-point signature | 89852 |
-
-`morgan_p23` is the default above 1000 training rows. Below that the full space is overkill and
-`morgan_p2` is used, which is also 10 to 30 times cheaper to compute.
+| `--folds` | 3 | Folds over the training portion, and so ensemble members |
+| `--time-budget` | 900 | Wall-clock cap for tuning **one fold**, in seconds |
+| `--seed` | 0 | The holdout partition and the tuner's sampler |
+| `--jobs` | 0 | LightGBM threads; 0 lets LightGBM decide |
 
 ## Limitations
 

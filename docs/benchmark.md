@@ -9,24 +9,75 @@ Measurement host: Apple Silicon (arm64), 10 cores (4 performance + 6 efficiency)
 
 ## Accuracy
 
-Deleted, not relabelled. Every accuracy figure in this document was measured on a
-scaffold-grouped holdout, which has been replaced by the reference implementation's
-random 20% holdout with folds over the rest. Those numbers describe a pipeline this
-code no longer is, and keeping them with a note would have left the project's most
-quoted tables wrong in a way a reader cannot see.
+Being regenerated. Every figure measured before this point described a pipeline with
+machinery that has since been removed, so they were deleted rather than relabelled.
+`python scripts/benchmark_tables.py` rebuilds the tables from the bundles.
 
-All 29 endpoints are retraining. `python scripts/benchmark_tables.py` regenerates
-the tables from the bundles, and `admetus benchmark run` the official five-seed
-numbers.
+## What the additions cost, measured
 
-What went with them: the prediction-interval coverage table, because conformal
-intervals were removed, and the before/after measurement of two leaks in the scaffold
-machinery, because that machinery is gone. The leak measurements are preserved in the
-commit that recorded them, which is the right place for the history of code that no
-longer exists.
+The pipeline was built as the reference implementation plus a series of additions,
+each with a plausible argument behind it and none of them requested. This is what
+they cost, measured on `carcinogens` -- 280 compounds, 21% positive, whose reference
+figure is a held-out ROC-AUC of 0.8646:
 
-The engineering measurements below -- feature widths, fingerprint cost, throughput,
-pruning and slicing -- are unaffected by the split, because none of them depends on it.
+| Configuration | ROC-AUC |
+|---|---|
+| With probability calibration, column pruning and a scaffold-grouped split | 0.249 |
+| Calibration removed | 0.751 |
+| Pruning removed, and tuning moved to one run per fold | 0.885 |
+| *The reference implementation's own figure* | *0.865* |
+
+The additions were costing **0.64 of ROC-AUC**, and the largest single piece of that
+was the calibrator inverting the ranking.
+
+### How a calibrator inverts a ranking
+
+Platt scaling fits `sigmoid(a*x + b)` with the slope unconstrained. On `carcinogens`
+it fitted `a = -37.6`: a monotonically *decreasing* function, which reverses the
+order of every prediction. Held-out ROC-AUC went from 0.7506 on the raw ensemble mean
+to 0.2494 after calibration -- which is 1 - 0.7506, the signature of a flip.
+
+It happens because the calibrator is fitted on out-of-fold predictions. A fold model
+that early-stopped at one round can be anti-correlated with its own validation rows,
+and on that data a flip genuinely is the better fit. The project already had a rule
+that a calibrator costing more than a small tolerance of the endpoint's metric is
+rejected -- but that rule is checked on the same out-of-fold data, where the flip
+scores as an improvement.
+
+### How a sorted file becomes a single-class fold
+
+`random_holdout` sorted the indices `train_test_split` returns. `cv_folds` cuts
+contiguous blocks, so file order decided fold membership, and these dataset files are
+sorted by label. On `bioavailability`:
+
+| | fold 0 | fold 1 | fold 2 |
+|---|---|---|---|
+| Positive rate, indices sorted | 35% | **100%** | 94% |
+| Positive rate, shuffled order kept | 74% | 80% | 74% |
+
+A validation fold that is entirely positive has `binary_error` minimal at iteration
+one, so the model stops there. Held-out ROC-AUC was 0.5121 against the reference's
+0.6867.
+
+### The others
+
+* **The applicability-domain flag** was uninformative at 16 of 29 endpoints: a flat
+  similarity-to-error curve collapsed `dili`'s threshold to 0.0139, so it reported
+  water as in-domain.
+* **Conformal prediction intervals** over-covered at 8 of 9 regression endpoints,
+  median 97.0% against a nominal 90%. Aspirin's Caco-2 interval was [-17.44, 8.18]
+  on labels spanning -7.76 to -3.51.
+* **Scaffold-grouped splitting** leaked: grouping by input string rather than
+  standardized structure put 9 of 129 held-out hERG molecules in a training
+  scaffold. Two full retrains went into fixing something that should not have
+  existed.
+* **Per-endpoint feature-set selection** chose three overrides from a study whose
+  baseline was the registry it was deciding, so adopting an override made it its own
+  baseline and the study could not re-derive its own earlier answer.
+
+The pattern across three rounds of review is the measurement worth keeping: **of 25
+findings, none were in the featurize-train-predict path.** All of them were in these
+additions or in the machinery built to support them.
 
 ## Feature space widths
 
