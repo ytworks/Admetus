@@ -1,0 +1,1 @@
+"""Admetus cli package."""

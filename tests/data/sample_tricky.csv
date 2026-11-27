@@ -1,0 +1,8 @@
+﻿compound_id,smiles,project,note
+001,"CC(=O)Oc1ccccc1C(=O)O",alpha,aspirin
+"0,2",CCO,beta,"multi
+line note"
+003,CC(=O)[O-].[Na+],alpha,"salt, stripped"
+004,not_a_molecule,gamma,"should fail"
+005,Cc1ccc(NC(=O)c2ccc(CN3CCN(C)CC3)cc2)cc1Nc1nccc(-c2cccnc2)n1,beta,imatinib
+006,CCO,beta,duplicate of row 2

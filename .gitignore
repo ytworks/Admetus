@@ -1,0 +1,21 @@
+# Datasets are fetched, not committed.
+/data/
+# Trained bundles are published as release assets, not committed.
+/models/
+# Local build and run output.
+/build/
+/dist/
+*.egg-info/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+# Optuna study databases.
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+.DS_Store

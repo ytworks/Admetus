@@ -1,0 +1,153 @@
+"""Choosing which feature columns to keep.
+
+The full space is 89,852 columns and the datasets hold between 276 and 13,445
+rows, so most columns carry nothing. Two reasons to drop them deliberately rather
+than leave it to the model:
+
+**Rare columns invite spurious splits.** A binary column set in exactly five
+molecules separates them perfectly, on a balanced label, with probability
+2 x 0.5^5 = 6.25%. With thousands of such columns, hundreds will look like
+perfect five-sample rules.
+
+**The threshold has to scale with the dataset.** A fixed count of five means
+"present in 1.8% of molecules" at n=276 and "present in 0.04%" at n=13,445. The
+band is therefore expressed as a prevalence, and it is two-sided: a column set in
+99% of molecules is as uninformative as one set in 1%.
+
+Selection uses the feature matrix only, never the labels, so it cannot leak label
+information into the estimate. A label-aware filter such as mutual information
+would, severely, at this ratio of columns to rows.
+
+Columns are addressed through a **basis**: the retained raw column indices, plus
+an ``int32`` map from every raw column to its position in the pruned space with
+``-1`` for dropped columns. A basis is fitted per endpoint, on its training rows
+only, and stored with the model.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+from scipy import sparse
+
+from admetus.errors import InputDataError
+from admetus.logging import get_logger
+
+log = get_logger("train.prune")
+
+
+@dataclass(frozen=True)
+class ColumnBasis:
+    """A pruned column space.
+
+    Attributes:
+        kept: Raw column indices retained, ascending.
+        n_raw: Width of the raw space the map covers.
+    """
+
+    kept: np.ndarray
+    n_raw: int
+
+    def __post_init__(self) -> None:
+        kept = np.asarray(self.kept)
+        if kept.ndim != 1:
+            raise ValueError("kept must be one-dimensional")
+        if kept.size and (np.any(np.diff(kept) <= 0) or kept[0] < 0 or kept[-1] >= self.n_raw):
+            raise ValueError("kept must be strictly ascending and within the raw space")
+
+    @property
+    def n_cols(self) -> int:
+        """Width of the pruned space."""
+        return int(self.kept.size)
+
+    @property
+    def col_map(self) -> np.ndarray:
+        """Map from raw column index to pruned position, ``-1`` where dropped.
+
+        Monotonic by construction, because ``kept`` is ascending, so projecting a
+        sorted row keeps it sorted.
+        """
+        out = np.full(self.n_raw, -1, dtype=np.int32)
+        out[self.kept] = np.arange(self.kept.size, dtype=np.int32)
+        return out
+
+    def to_dict(self) -> dict[str, object]:
+        """Record for the bundle. The indices themselves live in the npz."""
+        return {"n_raw": self.n_raw, "n_cols": self.n_cols}
+
+    def describe(self) -> str:
+        share = self.n_cols / self.n_raw if self.n_raw else 0.0
+        return f"{self.n_cols} of {self.n_raw} columns retained ({share:.2%})"
+
+
+def column_counts(matrix: sparse.csr_matrix) -> np.ndarray:
+    """Count the rows in which each column is non-zero."""
+    binary = matrix.tocsc(copy=False)
+    return np.diff(binary.indptr).astype(np.int64)
+
+
+def identity_basis(n_raw: int) -> ColumnBasis:
+    """Every column, kept.
+
+    The pruning this replaces dropped columns by how many training molecules set
+    them, two-sided, which is not something the reference implementation does: it
+    hands LightGBM the whole feature vector. The band was also the only remaining
+    size-dependent choice in the pipeline.
+
+    The basis type stays, because a bundle has to record which columns its boosters
+    were trained against and refuse a mismatch. It is simply the whole space now.
+    """
+    return ColumnBasis(kept=np.arange(n_raw, dtype=np.int32), n_raw=n_raw)
+
+
+def apply_basis(matrix: sparse.csr_matrix, basis: ColumnBasis) -> sparse.csr_matrix:
+    """Narrow a raw-space matrix to a basis.
+
+    Uses scipy's column indexing, which was measured at 11.5 ms for a
+    10,000-row by 89,852-column matrix with 4.26 million non-zeros -- about 3% of
+    the time that chunk takes to featurize, and faster than reindexing
+    ``indices``/``indptr`` by hand (20.7 ms). Serving all 29 endpoints from one
+    raw matrix therefore costs roughly 330 ms per chunk, so there is no reason to
+    complicate the featurizer with a shared intermediate basis.
+
+    Raises:
+        InputDataError: The matrix is not in the raw space the basis describes.
+    """
+    if matrix.shape[1] != basis.n_raw:
+        raise InputDataError(
+            f"matrix has {matrix.shape[1]} columns but the basis describes a "
+            f"{basis.n_raw}-column raw space; it was featurized against a different spec"
+        )
+    return matrix[:, basis.kept].tocsr()
+
+
+def project(matrix: sparse.csr_matrix, col_map: np.ndarray, n_cols: int) -> sparse.csr_matrix:
+    """Reindex a CSR matrix through a column map.
+
+    Needed where a basis is applied to indices as they are produced rather than to
+    an assembled matrix. For narrowing a matrix that already exists, prefer
+    :func:`apply_basis`.
+
+    Args:
+        matrix: Source matrix.
+        col_map: Monotonic map from source column to target position, ``-1`` to drop.
+        n_cols: Width of the target space.
+    """
+    source = matrix.tocsr(copy=False)
+    mapped = col_map[source.indices]
+    keep = mapped >= 0
+
+    # Row boundaries follow from the running count of retained entries, which
+    # also handles empty rows without special cases.
+    running = np.zeros(keep.size + 1, dtype=np.int64)
+    np.cumsum(keep, out=running[1:])
+    indptr = running[source.indptr]
+
+    indices = mapped[keep].astype(np.int32, copy=False)
+    data = np.ones(indices.size, dtype=np.float32)
+    return sparse.csr_matrix((data, indices, indptr), shape=(source.shape[0], n_cols))
+
+
+__all__ = [
+    "identity_basis","ColumnBasis", "apply_basis", "column_counts", "project"]

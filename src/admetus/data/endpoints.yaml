@@ -1,0 +1,402 @@
+# The endpoint registry: one entry per public dataset Admetus trains a model on.
+#
+# 29 endpoints. The first 22 (in_official_group: true) are the datasets of the
+# Therapeutics Data Commons ADMET benchmark group, so their numbers can be
+# compared with the published leaderboard. The remaining 7 are additional public
+# ADMET datasets from the same source.
+#
+# Fields
+#   key                 Stable identifier. Also the output column name.
+#   tdc_name            Dataset name as the upstream source publishes it.
+#   dataverse_id        Harvard Dataverse file id. The dataset is fetched from
+#                       https://dataverse.harvard.edu/api/access/datafile/<id>
+#   sha256              Digest of the file the models were trained against. A fetch
+#                       that disagrees is refused rather than adopted. These are the
+#                       digests we observed first, not checksums the source publishes,
+#                       so this is still trust on first use -- what it buys is that
+#                       the trust decision is frozen here, in version control, instead
+#                       of drifting silently on every run.
+#   label_name          For wide multi-task files, the label column to use.
+#   task                classification | regression
+#   metric              Primary metric. Chosen to match the official benchmark.
+#   unit                Unit of the label, as published. Reported to callers.
+#   species_filter      Keep only rows whose Species column equals this.
+#   correlated_with     Other endpoints whose predictions are not independent.
+#   expected_rows       Row count after normalization. Verified at fetch time.
+#   notes               Why anything unusual above is the way it is.
+#
+# Defaults that are computed rather than stored: the pruning band, the search budget
+# and low_confidence all follow from the training set size (see registry.py). The
+# feature space does not: every endpoint gets the same one.
+
+schema_version: 1
+
+endpoints:
+
+  # ---------------------------------------------------------------- absorption
+  - key: caco2
+    tdc_name: Caco2_Wang
+    dataverse_id: 4259569
+    sha256: 447d9f1af487c06b080145a2361dbe45af5b27afc83e1a975dd29b9ea535d6ab
+    task: regression
+    metric: mae
+    unit: log cm/s
+    in_official_group: true
+    expected_rows: 910
+    description: Caco-2 cell effective permeability.
+
+  - key: pampa
+    tdc_name: PAMPA_NCATS
+    dataverse_id: 6695858
+    sha256: 18b0ae755310cad7e4b6c3cdbe4a3c9190609995103c92536d41a4536511d854
+    task: classification
+    metric: auroc
+    unit: binary
+    in_official_group: false
+    expected_rows: 2035
+    description: Parallel artificial membrane permeability, high vs low.
+
+  - key: hia
+    tdc_name: HIA_Hou
+    dataverse_id: 4259591
+    sha256: 9040c5985fd366acf736bca1587902af28450976410fe99db82027e5d9c713b4
+    task: classification
+    metric: auroc
+    unit: binary
+    in_official_group: true
+    expected_rows: 578
+    description: Human intestinal absorption.
+
+  - key: pgp
+    tdc_name: Pgp_Broccatelli
+    dataverse_id: 4259597
+    sha256: 4fddc785a4f7109a92c60781fad9070a3917309cac5a78ac8e37bba17c54c9c0
+    task: classification
+    metric: auroc
+    unit: binary
+    in_official_group: true
+    expected_rows: 1219
+    description: P-glycoprotein inhibition.
+
+  - key: bioavailability
+    tdc_name: Bioavailability_Ma
+    dataverse_id: 4259567
+    sha256: 43d5b270657a819a48615e7976081b9215456ce4e5cad91a0a36d9fb5bd78508
+    task: classification
+    metric: auroc
+    unit: binary
+    in_official_group: true
+    expected_rows: 640
+    description: Oral bioavailability.
+
+  # ------------------------------------------------------------- distribution
+  - key: lipophilicity
+    tdc_name: Lipophilicity_AstraZeneca
+    dataverse_id: 4259595
+    sha256: 14add1edb356e62f78256ff964c0cbba03c007be3ff48d6d4c18679f307f1d4c
+    task: regression
+    metric: mae
+    unit: logD (octanol/water, pH 7.4)
+    in_official_group: true
+    expected_rows: 4200
+    description: Octanol/water distribution coefficient.
+
+  - key: solubility
+    tdc_name: Solubility_AqSolDB
+    dataverse_id: 4259610
+    sha256: 0b593f7b55abbe477ba4284aefd7b5450551f4ed21ac4aed80a097931141c9a4
+    task: regression
+    metric: mae
+    unit: log mol/L
+    in_official_group: true
+    expected_rows: 9982
+    notes: >-
+      largest_fragment is omitted deliberately. Aqueous solubility is measured on
+      the salt, so replacing a salt with its largest organic fragment would train
+      on a label describing a different chemical species.
+    description: Aqueous solubility.
+
+  - key: bbb
+    tdc_name: BBB_Martins
+    dataverse_id: 4259566
+    sha256: eb32676c7bf6e2bcd98b7625186bbb2ba4e4644c1d1468dfa18b6be665bd5e98
+    task: classification
+    metric: auroc
+    unit: binary
+    in_official_group: true
+    expected_rows: 2039
+    description: Blood-brain barrier penetration.
+
+  - key: ppbr
+    tdc_name: PPBR_AZ
+    dataverse_id: 6413140
+    sha256: 54c9520f4b6e04419b18bab7335583c3865d86fc53db40f74c2cff1577c8ec1b
+    task: regression
+    metric: mae
+    unit: percent bound
+    species_filter: Homo sapiens
+    in_official_group: true
+    expected_rows: 1614
+    notes: >-
+      The published file carries several species. Only human rows are used, which
+      is also what the benchmark group does. The target is bounded at 0-100 but
+      predictions are NOT clamped: the reference implementation reports the raw
+      ensemble mean, so a value slightly outside the range is possible and has been
+      observed (103.1% for CHEMBL1818187). Clamp it yourself if your caller needs
+      the bound.
+    description: Plasma protein binding rate.
+
+  - key: vdss
+    tdc_name: VDss_Lombardo
+    dataverse_id: 4267387
+    sha256: 00bb7e0dea19f78c4c1887e27ecf476135d9de2ef5ecc26d7c645c37bd9cb7af
+    task: regression
+    metric: spearman
+    unit: L/kg
+    in_official_group: true
+    expected_rows: 1130
+    notes: >-
+      Spans roughly 0.01 to 700 L/kg, and is trained and predicted on that raw
+      scale: no log transform, as the reference implementation does none. The loss
+      is therefore dominated by the high-volume compounds, which is a property of
+      the arrangement rather than an oversight.
+    description: Volume of distribution at steady state.
+
+  # ---------------------------------------------------------------- metabolism
+  - key: cyp2c9_veith
+    tdc_name: CYP2C9_Veith
+    dataverse_id: 4259577
+    sha256: 272bfd9de9899dd978993e23ccfb2a56680912ef6c8d89c0a9eac7f36c1c55c9
+    task: classification
+    metric: auprc
+    unit: binary
+    in_official_group: true
+    expected_rows: 12092
+    correlated_with: [cyp2d6_veith, cyp3a4_veith, cyp1a2_veith, cyp2c19_veith]
+    description: CYP2C9 inhibition.
+
+  - key: cyp2d6_veith
+    tdc_name: CYP2D6_Veith
+    dataverse_id: 4259580
+    sha256: 1b50a2f02a6d9c02d29fd9e3684d661f64bfe8afb1fea09e5ffb3d54174c411b
+    task: classification
+    metric: auprc
+    unit: binary
+    in_official_group: true
+    expected_rows: 13130
+    correlated_with: [cyp2c9_veith, cyp3a4_veith, cyp1a2_veith, cyp2c19_veith]
+    description: CYP2D6 inhibition.
+
+  - key: cyp3a4_veith
+    tdc_name: CYP3A4_Veith
+    dataverse_id: 4259582
+    sha256: 4c85a4cea9ffadd36fdd188f96b866d1d8db5d333a6d423172cf4363a585565a
+    task: classification
+    metric: auprc
+    unit: binary
+    in_official_group: true
+    expected_rows: 12328
+    correlated_with: [cyp2c9_veith, cyp2d6_veith, cyp1a2_veith, cyp2c19_veith]
+    description: CYP3A4 inhibition.
+
+  - key: cyp1a2_veith
+    tdc_name: CYP1A2_Veith
+    dataverse_id: 4259573
+    sha256: a18b335832495d4cfa4ecffccf7cdfa12eb08e84b6703aebcc25564e5f21553e
+    task: classification
+    metric: auprc
+    unit: binary
+    in_official_group: false
+    expected_rows: 12579
+    correlated_with: [cyp2c9_veith, cyp2d6_veith, cyp3a4_veith, cyp2c19_veith]
+    description: CYP1A2 inhibition.
+
+  - key: cyp2c19_veith
+    tdc_name: CYP2C19_Veith
+    dataverse_id: 4259576
+    sha256: 8cf4c9cde4b7693ab37ceeb66efdcc8b05b8848d33f06255d52ba7e6db754ebc
+    task: classification
+    metric: auprc
+    unit: binary
+    in_official_group: false
+    expected_rows: 12665
+    correlated_with: [cyp2c9_veith, cyp2d6_veith, cyp3a4_veith, cyp1a2_veith]
+    description: CYP2C19 inhibition.
+
+  - key: cyp2c9_substrate
+    tdc_name: CYP2C9_Substrate_CarbonMangels
+    dataverse_id: 4259584
+    sha256: a4b3d458cbca8cb74850464b15d5ab1f64787ea346cc38eedae29a388412f041
+    task: classification
+    metric: auprc
+    unit: binary
+    in_official_group: true
+    expected_rows: 669
+    description: CYP2C9 substrate.
+
+  - key: cyp2d6_substrate
+    tdc_name: CYP2D6_Substrate_CarbonMangels
+    dataverse_id: 4259578
+    sha256: 6eab25986d9a65595140447940f46d134ffd6c7c3fca3f25b5aaabcc30aa57d5
+    task: classification
+    metric: auprc
+    unit: binary
+    in_official_group: true
+    expected_rows: 667
+    description: CYP2D6 substrate.
+
+  - key: cyp3a4_substrate
+    tdc_name: CYP3A4_Substrate_CarbonMangels
+    dataverse_id: 4259581
+    sha256: 678341b7e40630a70b4e38b20e22dc73fbd8aff13fdd32cd7f6d702b62b5005e
+    task: classification
+    metric: auroc
+    unit: binary
+    in_official_group: true
+    expected_rows: 670
+    description: CYP3A4 substrate.
+
+  # ----------------------------------------------------------------- excretion
+  - key: half_life
+    tdc_name: Half_Life_Obach
+    dataverse_id: 4266799
+    sha256: 79fb8c943b64a9488bce588d747b59af1a782f1ce46bc51137c61fb895ede1df
+    task: regression
+    metric: spearman
+    unit: hours
+    in_official_group: true
+    expected_rows: 667
+    notes: >-
+      Spans roughly 0.065 to 1200 hours, trained and predicted on that raw scale
+      with no log transform, as with vdss.
+    description: Terminal half-life.
+
+  - key: clearance_hepatocyte
+    tdc_name: Clearance_Hepatocyte_AZ
+    dataverse_id: 4266187
+    sha256: 2c217f46600c22e107b72faa2bfb1d9bf799213aee47b601f6e0d6d73b68f274
+    task: regression
+    metric: spearman
+    unit: uL/min/10^6 cells
+    in_official_group: true
+    expected_rows: 1213
+    notes: >-
+      Contains values at or below the limit of quantification. They are used as
+      published: there is no transform and so no floor, and a prediction can fall
+      below the quantification limit.
+    description: Hepatocyte intrinsic clearance.
+
+  - key: clearance_microsome
+    tdc_name: Clearance_Microsome_AZ
+    dataverse_id: 4266186
+    sha256: 4c9047dc1860cc05d5bdc09aa9cfef86a40740605c2ff06990b1fceb6085db9d
+    task: regression
+    metric: spearman
+    unit: mL/min/g
+    in_official_group: true
+    expected_rows: 1102
+    notes: Same limit-of-quantification handling as clearance_hepatocyte.
+    description: Liver microsome intrinsic clearance.
+
+  # ------------------------------------------------------------------ toxicity
+  - key: ld50
+    tdc_name: LD50_Zhu
+    dataverse_id: 4267146
+    sha256: fdae7cfe7840fcca3341be0126cb6cbf1b16a4fcde42865f98cb9ca607f5ff16
+    task: regression
+    metric: mae
+    unit: -log10(mol/kg)
+    in_official_group: true
+    expected_rows: 7385
+    notes: >-
+      Already on a log scale, so no transform. Contains inorganics, metals and
+      mixtures that RDKit cannot featurize; those rows are reported, not replaced.
+    description: Acute oral toxicity in rats.
+
+  - key: herg
+    tdc_name: hERG
+    dataverse_id: 4259588
+    sha256: dfce97b6a89b710d20c93cf211f005fbee0d8445a60ca7df584cac430798a379
+    task: classification
+    metric: auroc
+    unit: binary
+    in_official_group: true
+    expected_rows: 655
+    correlated_with: [herg_karim]
+    notes: >-
+      A different curation of the same assay as herg_karim, with substantial
+      compound overlap. Kept because it is the benchmark-group dataset; for
+      practical prediction prefer herg_karim, which is 20x larger.
+    description: hERG channel blocking (benchmark curation).
+
+  - key: herg_karim
+    tdc_name: hERG_Karim
+    dataverse_id: 6822246
+    sha256: b47cbff0d65bbb5c6ade5ecd4c5bab20158c6cbf631a68f355efbe7e5fafc099
+    task: classification
+    metric: auroc
+    unit: binary
+    in_official_group: false
+    expected_rows: 13445
+    correlated_with: [herg]
+    description: hERG channel blocking (large multi-source curation).
+
+  - key: ames
+    tdc_name: AMES
+    dataverse_id: 4259564
+    sha256: 825c2b4c31c9cec81aa32eb394fd24e6b32ee4959905d4272e56483ecb6f3e16
+    task: classification
+    metric: auroc
+    unit: binary
+    in_official_group: true
+    expected_rows: 7278
+    description: Ames mutagenicity.
+
+  - key: dili
+    tdc_name: DILI
+    dataverse_id: 4259585
+    sha256: d3961647ff6df9711b6aa4b9fe59d6cbeb40f9d23dd6e9d51d6656e6e6df5ed8
+    task: classification
+    metric: auroc
+    unit: binary
+    in_official_group: true
+    expected_rows: 475
+    description: Drug-induced liver injury.
+
+  - key: carcinogens
+    tdc_name: Carcinogens_Lagunin
+    dataverse_id: 4259570
+    sha256: fe057a144d31a5883c0d9902173c4d208b9af826670d47d4ed0eeabf798fc160
+    task: classification
+    metric: auprc
+    unit: binary
+    in_official_group: false
+    expected_rows: 280
+    description: Carcinogenicity.
+
+  - key: skin_reaction
+    tdc_name: Skin Reaction
+    dataverse_id: 4259609
+    sha256: 95869192c2b252cf57eee429bff37a1f0b736f0ecec8f40799f05fb03dcee537
+    task: classification
+    metric: auroc
+    unit: binary
+    in_official_group: false
+    expected_rows: 404
+    description: Skin sensitization.
+
+  - key: tox21_nr_ar
+    tdc_name: Tox21
+    dataverse_id: 4259612
+    sha256: c32b1df7bcbe09101a4e20977a9ecc491f5707ca3ddc6afb1b507bfd4952fba7
+    label_name: NR-AR
+    task: classification
+    metric: auprc
+    unit: binary
+    in_official_group: false
+    expected_rows: 7265
+    notes: >-
+      One assay of the Tox21 panel: the androgen receptor, not general toxicity.
+      The published file is wide, with one column per assay; the other 11 assays
+      can be added as further entries without code changes.
+    description: Tox21 NR-AR (androgen receptor) activity.

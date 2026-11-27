@@ -1,0 +1,88 @@
+name: Verify published models
+
+# Training all 29 endpoints takes hours and a tuner, so it does not happen here:
+# the operator trains locally, runs `admetus models package`, and uploads the
+# archives and the manifest as the assets of a release. What a runner can do is
+# check that what was uploaded is installable by someone else -- which is the part
+# a local run cannot prove, because locally the bundles are already there.
+#
+# A release is therefore published in two steps, and this is the second:
+#
+#   admetus train --all --time-budget 900
+#   admetus models package --out dist/models
+#   gh release create models-vX.Y dist/models/* --draft --title ...
+#   git tag models-vX.Y && git push origin models-vX.Y   # runs this workflow
+#
+# If this job fails, the release is wrong: do not undraft it.
+
+on:
+  push:
+    tags: ["models-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to verify
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: install the release's bundles from scratch
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install OpenMP
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgomp1
+      - name: Install admetus
+        run: uv sync --python 3.12
+
+      - name: Download the release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          mkdir -p assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets
+          ls -l assets
+          test -f assets/models-manifest.json
+
+      # Installing from the manifest is the real test: every archive is checked
+      # against its recorded digest before it is unpacked, and each installed
+      # bundle then goes through the loader's own verification, golden
+      # fingerprint included.
+      - name: Install every bundle the manifest publishes
+        run: uv run admetus models pull --all --from assets --models-dir models
+
+      - name: The manifest and the installed set agree
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          uv run python - <<'PY'
+          import json, os, pathlib
+          from admetus.bundle.load import available
+          manifest = json.loads(pathlib.Path("assets/models-manifest.json").read_text())
+          published = sorted(b["endpoint"] for b in manifest["bundles"])
+          installed = sorted(available(pathlib.Path("models")))
+          assert published == installed, (published, installed)
+          assert manifest["n_bundles"] == len(published), manifest["n_bundles"]
+          for bundle in manifest["bundles"]:
+              held_out = bundle.get("held_out")
+              assert held_out and held_out.get("value") is not None, bundle["endpoint"]
+          print(f"{os.environ['TAG']}: {len(published)} bundle(s) installed and verified")
+          PY
+
+      - name: Every installed bundle verifies
+        run: uv run admetus models list --models-dir models --verify
+
+      - name: Predict with what was published
+        run: |
+          printf 'id,smiles\n1,CC(=O)Oc1ccccc1C(=O)O\n2,CN1C=NC2=C1C(=O)N(C)C(=O)N2C\n' > smiles.csv
+          uv run admetus predict --input smiles.csv --output out.csv --all --models-dir models
+          head -2 out.csv
+          uv run admetus doctor --models-dir models

@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint and documentation checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Lint
+        run: uv run --with 'ruff==0.17.6' ruff check .
+      - name: README.md and README.ja.md say the same thing
+        run: python scripts/check_readme_pair.py
+
+  test:
+    name: tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both supported platforms, and the next Python so a wheel gap shows up
+        # here rather than for a user.
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      # LightGBM's wheels link against an OpenMP runtime they do not ship.
+      - name: Install OpenMP (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libomp
+      - name: Install OpenMP (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgomp1
+      - name: Install
+        run: uv sync --all-extras --python ${{ matrix.python }}
+      - name: Self-check
+        # doctor exits 3 when the install is sound but no model bundle is present,
+        # which is the expected state in a fresh checkout. Anything else is a real
+        # problem: 1 means the install itself is broken.
+        run: |
+          set +e
+          uv run admetus doctor
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ] && [ "$code" -ne 3 ]; then
+            echo "::error::admetus doctor reported a broken install (exit $code)"
+            exit "$code"
+          fi
+      - name: Tests
+        # No network: the datasets are fetched, not vendored, and the tests use
+        # fixtures instead.
+        run: uv run pytest -q --cov=admetus --cov-report=term-missing
+      - name: Registry is complete and consistent
+        run: |
+          uv run python - <<'PY'
+          from admetus.data.registry import all_endpoints, official_endpoints
+          endpoints = all_endpoints()
+          assert len(endpoints) == 29, len(endpoints)
+          assert len(official_endpoints()) == 22
+          assert all(e.sha256 and len(e.sha256) == 64 for e in endpoints)
+          print(f"{len(endpoints)} endpoints, all with a pinned digest")
+          PY
+
+  docker:
+    name: docker image builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          load: true
+          tags: admetus:ci
+      - name: Smoke test the image
+        run: |
+          docker run --rm admetus:ci --version
+          docker run --rm admetus:ci endpoints --json | python -c "import json,sys; d=json.load(sys.stdin); assert d['n_endpoints']==29, d['n_endpoints']; print('endpoints ok')"
+          docker run --rm admetus:ci doctor --json | python -c "import json,sys; d=json.load(sys.stdin); assert d['lightgbm']['ok'], d['lightgbm']; assert d['chemistry']['ok'], d['chemistry']; print('doctor ok')"
