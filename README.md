@@ -120,8 +120,12 @@ The image carries the OpenMP runtime, so nothing else is needed.
 docker run --rm -v "$PWD:/data" ghcr.io/ytworks/admetus:latest endpoints
 ```
 
+Prediction needs the bundles too. The image reads them from `/models`, so mount the
+directory that holds them; mounting only `/data` leaves `/models` an empty volume and
+the run cannot find a model.
+
 ```bash
-docker run --rm -v "$PWD:/data" ghcr.io/ytworks/admetus:latest predict -i /data/in.csv -o /data/out.csv --endpoint dili
+docker run --rm -v "$PWD:/data" -v "$PWD/models:/models" ghcr.io/ytworks/admetus:latest predict -i /data/in.csv -o /data/out.csv --endpoint dili
 ```
 
 ## Quickstart

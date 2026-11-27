@@ -140,9 +140,49 @@ class TuneResult:
         }
 
 
+#: Where resumable tuning studies live, beside the model directory rather than
+#: inside it.
+STUDIES_DIR = "studies"
+
+
 def study_path(models_dir: Path, key: str) -> Path:
-    """Where an endpoint's study database lives, so tuning can be resumed."""
-    return Path(models_dir) / key / "optuna.sqlite"
+    """Where an endpoint's study database lives, so tuning can be resumed.
+
+    Beside the bundles, not inside one. It used to be ``<models>/<key>/optuna.sqlite``
+    and :func:`admetus.bundle.save.save` replaces that whole directory atomically, so
+    a successful run deleted the study it had just built: a `skin_reaction` run
+    recorded 61 completed trials and left nothing behind, and raising the budget with
+    `--force` started the search over.
+
+    It is also not a model file, so publishing a bundle should not carry it.
+    """
+    return Path(models_dir) / STUDIES_DIR / f"{key}.sqlite"
+
+
+def study_name(key: str, feature_set: str, n_columns: int, n_folds: int, params: dict[str, Any]) -> str:
+    """Name a study after the settings that decide whether its trials still apply.
+
+    Resuming is only sound while the search is over the same thing. A different
+    feature set, a different column count after pruning, a different fold count or a
+    different objective all change what a trial's score means, so each gets its own
+    study inside the same database rather than adding trials to one that measured
+    something else.
+    """
+    import hashlib
+
+    signature = "|".join(
+        str(x) for x in (
+            feature_set,
+            n_columns,
+            n_folds,
+            params.get("objective"),
+            params.get("metric"),
+            round(float(params.get("scale_pos_weight", 1.0)), 4),
+            params.get("learning_rate"),
+        )
+    )
+    digest = hashlib.blake2b(signature.encode(), digest_size=5).hexdigest()
+    return f"admetus-{key}-{digest}"
 
 
 def fixed_params(
@@ -291,6 +331,7 @@ def default_params(task: str, metric: str, n_train: int, num_threads: int = 0, s
 
 __all__ = [
     "BALANCED_POS_RATE",
+    "STUDIES_DIR",
     "DEFAULT_TIME_BUDGET_SECONDS",
     "MAXIMIZE_METRICS",
     "SEVERE_POS_RATE",
@@ -301,5 +342,6 @@ __all__ = [
     "class_weight",
     "default_params",
     "fixed_params",
+    "study_name",
     "study_path",
 ]

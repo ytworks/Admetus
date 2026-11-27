@@ -202,7 +202,9 @@ def predict_command(
                 f"{report.n_failed} failed -> {out_path}",
                 err=True,
             )
-        if strict and report.n_failed:
+        # Exit 4 covers both documented cases: --strict with any failure, and every
+        # row failing. The report has already been written either way.
+        if report.all_failed or (strict and report.n_failed):
             raise SystemExit(EXIT_PARTIAL_FAILURE)
 
     run_guarded(body, as_json=as_json)
@@ -247,7 +249,7 @@ def _rows_from_csv(path: Path, report, options: runner.Options) -> list[dict]:
 def _report_payload(report, models, source, destination) -> dict:
     """Assemble the report document."""
     return {
-        "ok": True,
+        "ok": not report.all_failed,
         "input": str(source) if source else None,
         "output": str(destination) if destination else "-",
         "endpoints": [m.key for m in models],
@@ -265,6 +267,7 @@ def _report_payload(report, models, source, destination) -> dict:
         "failure_reasons": report.failure_reasons,
         "failures": report.failures,
         "failures_truncated": report.n_failed > len(report.failures),
+        "all_failed": report.all_failed,
         "timings_s": report.timings,
         "throughput_rows_per_s": (
             round(report.n_rows / report.timings["total"], 1)

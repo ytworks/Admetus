@@ -359,8 +359,9 @@ def test_endpoints_on_different_feature_spaces_predict_in_one_run(
     assert report.n_featurized == 3
 
     header = next(csvio.read_records(destination, csvio.sniff(destination))).fields
-    # The byte-order mark survives, because the passthrough is of bytes.
-    assert header[:4] == ["\ufeffcompound_id", "smiles", "project", "note"]
+    assert header[:4] == ["compound_id", "smiles", "project", "note"]
     body = destination.read_bytes()
+    # The byte-order mark survives in the bytes, where it belongs.
+    assert body.startswith(b"\xef\xbb\xbf")
     assert b"multi\nline note" in body
     assert body.count(b"\r\n") >= 4

@@ -118,11 +118,29 @@ def compute(metric: str, y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return fn(np.asarray(y_true), np.asarray(y_pred))
 
 
-def evaluate(task: str, y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
+def evaluate(
+    task: str, y_true: np.ndarray, y_pred: np.ndarray, shipped_threshold: float | None = None
+) -> dict[str, float]:
     """Compute every metric that applies to a task.
 
     Reporting the whole set, not just the primary metric, is what makes a
     comparison with another model's chosen metric possible.
+
+    Args:
+        task: ``classification`` or ``regression``.
+        y_true: Labels on the published scale.
+        y_pred: Predictions.
+        shipped_threshold: The cutoff the bundle actually carries, chosen at
+            training time from out-of-fold predictions. Given, the Matthews
+            correlation **at that cutoff** is reported as ``mcc``, which is what a
+            caller using the shipped model gets.
+
+    The threshold that maximizes MCC on these very labels is also returned, as
+    ``mcc_at_best_threshold`` with ``best_threshold`` beside it, but it is a
+    retrospective diagnostic and not a number this model can deliver: it was chosen
+    by looking at the labels it is scored on. On hERG the shipped cutoff gives 0.5230
+    on the 129 held-out rows while the test-selected maximum reads 0.6095, and
+    quoting the second as performance would be quoting an oracle.
     """
     y_true = np.asarray(y_true, float)
     y_pred = np.asarray(y_pred, float)
@@ -136,6 +154,10 @@ def evaluate(task: str, y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, flo
         threshold, mcc = best_threshold(y_true, y_pred)
         out["mcc_at_best_threshold"] = mcc
         out["best_threshold"] = threshold
+        out["mcc_at_best_threshold_is_retrospective"] = 1.0
+        if shipped_threshold is not None:
+            out["mcc"] = matthews(y_true, (y_pred >= shipped_threshold).astype(float))
+            out["shipped_threshold"] = float(shipped_threshold)
         return out
     return {
         "mae": mae(y_true, y_pred),

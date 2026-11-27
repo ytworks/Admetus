@@ -90,6 +90,8 @@ class Report:
     endpoints: list[dict[str, Any]] = field(default_factory=list)
     added_columns: list[str] = field(default_factory=list)
     timings: dict[str, float] = field(default_factory=dict)
+    #: Every row failed. Reported rather than raised, so the report survives.
+    all_failed: bool = False
 
     def record_failure(self, row: int, smiles: str, reason: str, cap: int = 100) -> None:
         """Count a failure, keeping a capped sample of the detail."""
@@ -385,9 +387,12 @@ def run(
                     report.n_featurized += 1
                 memo.move_to_end(text)
 
-            while len(memo) > options.memo_size:
-                memo.popitem(last=False)
-
+            # Trimmed *after* the chunk is written, below. Trimming here evicted
+            # results this chunk had just computed -- with --memo-size 1 and two
+            # valid rows, the first row's prediction was dropped and the output
+            # reported a cache eviction as a molecule failure. A memory limit is
+            # about what is carried between chunks, not about what the current chunk
+            # is allowed to produce.
             for position, record in enumerate(chunk):
                 text = raw[position]
                 pad = [EMPTY] * padding[position]
@@ -405,6 +410,11 @@ def run(
                         )
                 out.write(record, [*pad, *cells, reason or EMPTY])
 
+            # Now that every row of this chunk has been written, bound what is
+            # carried into the next one.
+            while len(memo) > options.memo_size:
+                memo.popitem(last=False)
+
             if not progress_disabled():
                 log.info("processed %d row(s)", report.n_rows)
 
@@ -414,10 +424,14 @@ def run(
         "predict": round(t_predict, 3),
         "total": round(time.time() - started, 3),
     }
-    if report.n_rows and report.n_failed == report.n_rows:
-        raise InputDataError(
-            f"every one of the {report.n_rows} row(s) failed. "
-            f"Reasons: {report.failure_reasons}"
+    # Every row failing is recorded on the report rather than raised. Raising lost
+    # the report: --report wrote no file, the reasons never reached the caller, and
+    # the documented all-failed exit code (4) could not be returned because the CLI
+    # never saw a result. The CLI decides the exit code from this flag.
+    report.all_failed = bool(report.n_rows) and report.n_failed == report.n_rows
+    if report.all_failed:
+        log.error(
+            "every one of the %d row(s) failed. Reasons: %s", report.n_rows, report.failure_reasons
         )
     return report
 

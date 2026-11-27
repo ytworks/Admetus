@@ -333,7 +333,9 @@ def train_endpoint(
         tuned = tuning.auto_tune(
             x_train, y_train, fold_sets, params, seed=seed, time_budget=time_budget,
             storage=tuning.study_path(models_dir, endpoint.key) if models_dir else None,
-            study_name=f"admetus-{endpoint.key}",
+            study_name=tuning.study_name(
+                endpoint.key, spec.feature_set, basis.n_cols, len(fold_sets), params
+            ),
         )
         merged = tuned.params
         tune_record = tuned.to_dict()
@@ -404,7 +406,10 @@ def train_endpoint(
         prediction = transforms.clamp(transform.inverse(mean_fitted), endpoint.output_range)
 
     test_metrics: dict[str, Any] = {
-        k: float(v) for k, v in metrics.evaluate(endpoint.task, y_test, prediction).items()
+        k: float(v)
+        for k, v in metrics.evaluate(
+            endpoint.task, y_test, prediction, shipped_threshold=best_threshold
+        ).items()
     }
     primary = metrics.bootstrap(
         endpoint.metric, y_test, prediction, n_resamples=bootstrap_resamples, seed=seed

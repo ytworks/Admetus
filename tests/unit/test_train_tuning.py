@@ -123,8 +123,11 @@ def test_study_direction_follows_the_metric():
     assert tuning._direction("l2") == "minimize"
 
 
-def test_study_path_sits_beside_the_bundle(tmp_path):
-    assert tuning.study_path(tmp_path, "dili") == tmp_path / "dili" / "optuna.sqlite"
+def test_study_path_sits_beside_the_bundles_not_inside_one(tmp_path):
+    """This asserted the old location, which was the defect: `save` replaces the
+    endpoint directory atomically, so a study kept inside it was deleted by the
+    successful run that built it."""
+    assert tuning.study_path(tmp_path, "dili") == tmp_path / "studies" / "dili.sqlite"
 
 
 @pytest.mark.slow
@@ -217,3 +220,35 @@ def test_untuned_defaults_respect_the_tuner_grid_floor():
     params = tuning.default_params("classification", "auroc", 400)
     assert params["feature_fraction"] >= 0.4
     assert params["learning_rate"] == 0.03
+
+
+def test_the_study_lives_outside_the_bundle_that_gets_replaced():
+    """`save` replaces the endpoint directory atomically, study and all.
+
+    A real `skin_reaction` run recorded 61 completed trials and left no database
+    behind, because the study sat inside the directory `save` swaps out. Raising the
+    budget with `--force` then repeated the search from scratch.
+    """
+    from pathlib import Path
+
+    from admetus.train.tuning import study_path
+
+    models = Path("/models")
+    path = study_path(models, "dili")
+    assert models / "dili" not in path.parents
+    assert path.parent == models / "studies"
+
+
+def test_a_study_is_named_after_the_settings_its_trials_depend_on():
+    """Trials only transfer while the search is over the same thing."""
+    from admetus.train.tuning import fixed_params, study_name
+
+    auroc = fixed_params("classification", "auroc")
+    auprc = fixed_params("classification", "auprc")
+
+    base = study_name("dili", "morgan_p2", 1632, 5, auroc)
+    assert base == study_name("dili", "morgan_p2", 1632, 5, auroc)          # stable
+    assert base != study_name("dili", "morgan_p23", 7096, 5, auroc)         # feature set
+    assert base != study_name("dili", "morgan_p2", 1632, 3, auroc)          # fold count
+    assert base != study_name("dili", "morgan_p2", 1632, 5, auprc)          # objective
+    assert base != study_name("herg", "morgan_p2", 1632, 5, auroc)          # endpoint

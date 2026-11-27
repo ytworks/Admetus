@@ -28,6 +28,7 @@ unchanged, while the SMILES column -- ASCII by construction -- still parses.
 
 from __future__ import annotations
 
+import contextlib
 import csv
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -68,6 +69,7 @@ class _LineCapture:
     def __init__(self, stream: TextIO) -> None:
         self._stream = stream
         self._buffer: list[str] = []
+        self._first = True
 
     def __iter__(self) -> _LineCapture:
         return self
@@ -75,6 +77,15 @@ class _LineCapture:
     def __next__(self) -> str:
         line = next(self._stream)
         self._buffer.append(line)
+        if self._first:
+            self._first = False
+            # The parser must not see the byte-order mark, while the raw text keeps
+            # it: a BOM sitting before an opening quote stops csv from recognizing
+            # the field as quoted, so `"smiles","id"` parsed as a column literally
+            # called '"smiles"' and the SMILES column could not be found. Stripping
+            # it afterwards is too late. `take()` still returns the mark, because
+            # the output is a byte-for-byte passthrough of the input.
+            return line.lstrip(BOM)
         return line
 
     def take(self) -> str:
@@ -194,6 +205,16 @@ class Appender:
 
     def __enter__(self) -> Appender:
         if self._stdout is not None:
+            # Standard output has to carry the input's encoding too. Writing through
+            # the terminal's encoding turned a cp932 passthrough column into UTF-8,
+            # so `predict --encoding cp932 > out.csv` and `-o out.csv` produced
+            # different bytes from one input -- and only one of them was a
+            # passthrough. Reconfiguring the stream is enough; it is the same
+            # handle, so nothing about buffering or ownership changes.
+            with contextlib.suppress(AttributeError, ValueError):
+                self._stdout.reconfigure(
+                    encoding=self.dialect.encoding, errors="surrogateescape", newline=""
+                )
             self._handle = self._stdout
             return self
         self._path.parent.mkdir(parents=True, exist_ok=True)

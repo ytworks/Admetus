@@ -23,7 +23,7 @@ from admetus.cli.options import (
 )
 from admetus.data import loader
 from admetus.data.registry import resolve_keys
-from admetus.errors import AdmetusError
+from admetus.errors import EXIT_NO_MODEL, AdmetusError
 from admetus.logging import get_logger
 from admetus.train import tuning
 from admetus.train.trainer import train_endpoint
@@ -205,20 +205,29 @@ def evaluate_command(
             })
 
         if as_json:
+            # The outcome is the same in both modes. Reporting ok:true with no
+            # result and exit 0 told an automated caller that an endpoint with no
+            # model had been evaluated, which is the one thing it needs to know
+            # is false.
             emit({
-                "ok": True,
+                "ok": bool(rows),
                 "models_dir": str(directory),
                 "n_models": len(rows),
                 "n_missing": len(missing),
                 "missing": missing,
                 "results": rows,
+                "remediation": (
+                    None if rows else f"admetus train --endpoint {missing[0]}" if missing else None
+                ),
             })
+            if not rows:
+                raise SystemExit(EXIT_NO_MODEL)
             return
         if not rows:
             click.echo(f"no trained models in {directory}")
             if missing:
                 click.echo(f"train them with: admetus train --endpoint {missing[0]}")
-            raise SystemExit(3)
+            raise SystemExit(EXIT_NO_MODEL)
         click.echo(f"{'endpoint':<22} {'metric':<9} {'held-out (95% CI)':<26} {'n':>5}  notes")
         for row in rows:
             primary = row["primary"] or {}

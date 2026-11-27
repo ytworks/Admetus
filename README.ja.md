@@ -117,8 +117,12 @@ admetus doctor
 docker run --rm -v "$PWD:/data" ghcr.io/ytworks/admetus:latest endpoints
 ```
 
+予測にはバンドルも必要です。イメージは `/models` から読むので、バンドルのあるディレクトリを
+マウントしてください。`/data` だけをマウントすると `/models` は空のボリュームのままで、
+モデルが見つかりません。
+
 ```bash
-docker run --rm -v "$PWD:/data" ghcr.io/ytworks/admetus:latest predict -i /data/in.csv -o /data/out.csv --endpoint dili
+docker run --rm -v "$PWD:/data" -v "$PWD/models:/models" ghcr.io/ytworks/admetus:latest predict -i /data/in.csv -o /data/out.csv --endpoint dili
 ```
 
 ## クイックスタート

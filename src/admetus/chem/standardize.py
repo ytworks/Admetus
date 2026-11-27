@@ -105,7 +105,17 @@ def standardize(smiles: str, steps: tuple[str, ...] = ("cleanup", "largest_fragm
     if not text:
         return StandardizeResult(None, None, "smiles is empty")
 
-    mol = Chem.MolFromSmiles(text)
+    try:
+        mol = Chem.MolFromSmiles(text)
+    except UnicodeEncodeError:
+        # The CSV reader uses surrogateescape, so a cell the declared encoding
+        # cannot decode arrives as lone surrogates and RDKit's C++ boundary raises
+        # when it encodes them. Left to propagate, one such cell aborted the whole
+        # batch with exit 1 and the valid structures around it got no prediction.
+        # It is a property of one row, so it is one row's failure.
+        return StandardizeResult(
+            None, None, "the smiles cell could not be decoded with the declared encoding"
+        )
     if mol is None:
         return StandardizeResult(None, None, "rdkit could not parse the smiles")
     if mol.GetNumAtoms() == 0:

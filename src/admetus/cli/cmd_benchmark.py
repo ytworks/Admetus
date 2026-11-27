@@ -174,10 +174,12 @@ def run_command(
 
         payload = {
             "ok": not failed and all(r["n_seeds"] == len(chosen_seeds) for r in results),
+            "n_comparable": sum(1 for r in results if r["comparable_with_leaderboard"]),
             "protocol": "official benchmark group: published train_val/test split per endpoint",
             "archive_sha256": bench.ARCHIVE_SHA256,
             "seeds": list(chosen_seeds),
             "complete_protocol": len(chosen_seeds) == len(bench.OFFICIAL_SEEDS),
+            "feature_set_source": "size rule, which no label can influence",
             "tuned_per_seed": tune,
             "time_budget_seconds": budget if tune else None,
             "n_endpoints": len(results),

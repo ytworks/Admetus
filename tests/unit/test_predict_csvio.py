@@ -45,13 +45,22 @@ def test_duplicate_column_names_survive(nasty):
     assert header.count("note") == 2
 
 
-def test_bom_is_detected_and_does_not_break_column_matching(nasty):
+def test_bom_is_detected_and_kept_out_of_the_parsed_fields(nasty):
+    """The mark stays in the bytes and out of the field.
+
+    It used to reach the parsed field, and every consumer stripped it afterwards.
+    That worked until the first column was quoted: a mark before the opening quote
+    stops csv from seeing a quoted field, so `"smiles","id"` parsed as a column
+    literally named '"smiles"' and the run exited 2. Stripping it for the parser's
+    view and keeping the raw text for output fixes both.
+    """
     dialect = csvio.sniff(nasty)
     assert dialect.has_bom
-    header = next(csvio.read_records(nasty, dialect)).fields
-    assert header[0].startswith(csvio.BOM)
-    # Matching strips it, so the first column is still findable by name.
-    assert csvio.find_column(header, "id") == 0
+    record = next(csvio.read_records(nasty, dialect))
+    assert record.fields[0] == "id"
+    assert csvio.find_column(record.fields, "id") == 0
+    # The byte-for-byte passthrough still has it.
+    assert record.body.startswith(csvio.BOM)
 
 
 def test_a_quoted_field_containing_a_newline_is_one_record(nasty):

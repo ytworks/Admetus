@@ -117,9 +117,7 @@ class Endpoint:
         """Pick the feature space, from the override or from the dataset size."""
         if self.feature_set_override:
             return self.feature_set_override
-        if n_train is not None and n_train < SMALL_DATASET_ROWS:
-            return "morgan_p2"
-        return "morgan_p23"
+        return feature_set_from_size(n_train)
 
     def featurizer_spec(self, n_train: int | None = None) -> FeaturizerSpec:
         """Return the featurizer spec for this endpoint, with its standardization pipeline."""
@@ -165,6 +163,20 @@ class Endpoint:
             "description": self.description,
             "notes": self.notes,
         }
+
+
+def feature_set_from_size(n_train: int | None) -> str:
+    """The feature space the size rule alone gives, ignoring any measured override.
+
+    Separate from :meth:`Endpoint.feature_set` because it depends on a row count and
+    on nothing else. The overrides in the registry were chosen by cross-validation
+    over a whole dataset, and for an endpoint of the official group that dataset
+    contains the published test compounds -- so the official protocol must not
+    inherit them. It asks for this instead, which no label can influence.
+    """
+    if n_train is not None and n_train < SMALL_DATASET_ROWS:
+        return "morgan_p2"
+    return "morgan_p23"
 
 
 def prevalence_range(n_train: int) -> PrevalenceRange:
@@ -315,6 +327,7 @@ __all__ = [
     "PrevalenceRange",
     "SearchBudget",
     "all_endpoints",
+    "feature_set_from_size",
     "get_endpoint",
     "load_registry",
     "official_endpoints",

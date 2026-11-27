@@ -88,20 +88,25 @@ def official_table(report: Path) -> str:
     payload = json.loads(Path(report).read_text(encoding="utf-8"))
     by_key = {r["endpoint"]: r for r in payload.get("results", [])}
     lines = [
-        "| Endpoint | Metric | Official protocol | Seeds | Test rows |",
-        "|---|---|---|---|---|",
+        "| Endpoint | Metric | Official protocol | Seeds | Test rows scored | Comparable |",
+        "|---|---|---|---|---|---|",
     ]
     for endpoint in all_endpoints():
         entry = by_key.get(endpoint.key)
         if not entry:
             continue
         seeds = entry.get("seeds") or []
-        n_test = seeds[0]["n_test"] if seeds else "-"
+        scored = seeds[0]["n_test"] if seeds else 0
+        published = (seeds[0].get("n_test_published") or 0) if seeds else 0
+        rows = f"{scored} of {published}" if published and scored != published else str(scored or "-")
+        # A partial result is labelled in the table, not quietly presented as one.
+        comparable = entry.get("comparable_with_leaderboard")
+        mark = "yes" if comparable else "no: " + "; ".join(entry.get("not_comparable_because") or ["unknown"])
         lines.append(
             f"| `{endpoint.key}` | {endpoint.metric} | "
             f"{_format(entry['mean'], endpoint.metric)} +/- "
             f"{_format(entry['sd'], endpoint.metric)} | "
-            f"{entry['n_seeds']} | {n_test} |"
+            f"{entry['n_seeds']} | {rows} | {mark} |"
         )
     return "\n".join(lines)
 
