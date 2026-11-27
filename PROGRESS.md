@@ -4,6 +4,7 @@ Cross-session memory for Admetus: what exists, what is measured, what is not don
 and what to pick up next. Read this first, then `CLAUDE.md`.
 
 Last updated: 2026-11-27. Branch `feat/core-featurizer-and-data`, draft PR #1.
+187 tests pass locally on macOS and in CI on Ubuntu for Python 3.12 and 3.13.
 
 ## State
 
@@ -23,7 +24,7 @@ empty rather than estimated.
 | `bundle/` save and load with spec verification | done, tested |
 | `predict/` byte-preserving CSV, runner | done, tested |
 | `cli/` doctor, endpoints, data, train, evaluate, predict, models | done |
-| CI and Docker | written, not yet exercised (no Docker on the development machine) |
+| CI and Docker | exercised on the branch. Lint, the README pair check and the Ubuntu test matrix pass; the Docker image builds and its smoke tests pass. macOS runners were cancelled on an unschedulable `macos-14` label and are now on `macos-latest`, pending confirmation |
 | README in English and Japanese | done, pair check passes |
 | Trained models and accuracy numbers | **not done** |
 
@@ -47,8 +48,11 @@ empty rather than estimated.
 4. **Publish model bundles.** The release side of section 7 is unwritten: no
    `models pull`, no manifest, no release workflow for bundles. `admetus models`
    currently only lists and shows what is local.
-5. **Exercise CI and the Docker build.** Both are written but unverified, because
-   this machine has no Docker daemon. The first CI run on the PR will tell.
+5. **Confirm the macOS CI matrix.** Ubuntu, lint and the Docker build all pass.
+   The macOS jobs were cancelled before running a step, which is what an
+   unschedulable runner label looks like rather than a test failure; the label is
+   now `macos-latest` and the next run should confirm it. Nothing has yet verified
+   the project on macOS *in CI*, though all 187 tests pass on macOS locally.
 
 ## Decisions worth not relitigating
 
@@ -82,6 +86,16 @@ Each of these was measured, and several contradict what the plan originally said
   real and recorded in every bundle: its `feature_fraction` grid starts at 0.4,
   and it sets `feature_pre_filter` to `False`. The explicit prevalence pruning is
   consequently the only rare-column guard, so do not thin it out.
+
+## CI notes
+
+- `admetus doctor` exits **3** when the install is sound but no model bundle is
+  present, which is the normal state of a fresh checkout. The CI self-check
+  accepts 0 and 3 and fails on anything else, since 1 means a broken install.
+  A naive `run: admetus doctor` fails the build.
+- Remediation strings must name commands that exist. `doctor` and the bundle
+  loader used to suggest `admetus models pull`, which is not implemented;
+  pointing an automated caller at a missing command is worse than saying nothing.
 
 ## Things the code refuses to do, on purpose
 
