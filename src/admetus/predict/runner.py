@@ -34,7 +34,6 @@ import numpy as np
 from admetus.bundle.load import LoadedModel
 from admetus.chem.featurizer import build_csr
 from admetus.chem.parallel import DEFAULT_BATCH_SIZE, Featurizer, resolve_jobs
-from admetus.chem.similarity import in_domain, max_similarity, pack_bits
 from admetus.errors import InputDataError
 from admetus.logging import get_logger, progress_disabled
 from admetus.predict import csvio
@@ -61,9 +60,6 @@ class Options:
     chunk_size: int = DEFAULT_CHUNK_SIZE
     batch_size: int = DEFAULT_BATCH_SIZE
     memo_size: int = DEFAULT_MEMO_SIZE
-    applicability_domain: bool = True
-    interval: bool = False
-    ad_score: bool = False
     column_prefix: str = ""
     on_collision: str = "suffix"
     on_ragged: str = "error"
@@ -117,12 +113,6 @@ def column_names(model: LoadedModel, options: Options) -> list[str]:
     base = f"{prefix}{model.key}"
     names = [base]
     names.append(f"{base}_sd_log10" if model.transform.is_log else f"{base}_ens_sd")
-    if options.applicability_domain and model.reference is not None:
-        names.append(f"{base}_in_domain")
-        if options.ad_score:
-            names.append(f"{base}_ad_score")
-    if options.interval and model.interval is not None:
-        names.extend([f"{base}_lo", f"{base}_hi"])
     return names
 
 
@@ -166,17 +156,10 @@ class EndpointOutput:
     """One endpoint's columns for a chunk of distinct molecules."""
 
     values: list[list[str]]
-    n_in_domain: int
     n_predicted: int
 
 
-def predict_block(
-    model: LoadedModel,
-    matrix,
-    packed: np.ndarray | None,
-    popcount: np.ndarray | None,
-    options: Options,
-) -> EndpointOutput:
+def predict_block(model: LoadedModel, matrix, options: Options) -> EndpointOutput:
     """Predict one endpoint over a block of featurized molecules."""
     narrowed = prune.apply_basis(matrix, model.basis)
     stacked = np.column_stack([b.predict(narrowed) for b in model.boosters])
@@ -191,35 +174,12 @@ def predict_block(
         # Reported in the space it was computed in, which the column name states.
         spread = spread_fitted
 
-    low = high = None
-    if options.interval and model.interval is not None:
-        lo_fitted, hi_fitted = model.interval.bounds(mean_fitted, spread_fitted)
-        low = transforms.clamp(model.transform.inverse(lo_fitted), model.output_range)
-        high = transforms.clamp(model.transform.inverse(hi_fitted), model.output_range)
-
-    domain = score = None
-    n_in_domain = 0
-    if options.applicability_domain and model.reference is not None and packed is not None:
-        if options.ad_score:
-            score = max_similarity(packed, popcount, model.reference)
-            domain = score >= model.reference.threshold
-        else:
-            domain = in_domain(packed, popcount, model.reference)
-        n_in_domain = int(np.count_nonzero(domain))
-
-    rows: list[list[str]] = []
     precision = options.precision
-    for i in range(matrix.shape[0]):
-        cells = [_format(value[i], precision), _format(spread[i], precision)]
-        if domain is not None:
-            cells.append("true" if domain[i] else "false")
-            if score is not None:
-                cells.append(_format(score[i], precision))
-        if low is not None:
-            cells.extend([_format(low[i], precision), _format(high[i], precision)])
-        rows.append(cells)
-
-    return EndpointOutput(values=rows, n_in_domain=n_in_domain, n_predicted=matrix.shape[0])
+    rows = [
+        [_format(value[i], precision), _format(spread[i], precision)]
+        for i in range(matrix.shape[0])
+    ]
+    return EndpointOutput(values=rows, n_predicted=matrix.shape[0])
 
 
 def run(
@@ -282,7 +242,7 @@ def run(
 
     jobs = resolve_jobs(options.jobs, options.chunk_size)
     memo: OrderedDict[str, tuple[list[str], str | None]] = OrderedDict()
-    endpoint_stats = [{"key": m.key, "n_predicted": 0, "n_in_domain": 0} for m in models]
+    endpoint_stats = [{"key": m.key, "n_predicted": 0} for m in models]
     blank = [EMPTY] * (len(resolved) - 1)
 
     t_featurize = 0.0
@@ -364,17 +324,9 @@ def run(
 
                 t0 = time.time()
                 matrix = build_csr(rows, spec.n_features)
-                packed = popcount = None
-                if options.applicability_domain and any(
-                    models[p].reference is not None for p in group.positions
-                ):
-                    packed, popcount = pack_bits(
-                        [r[r < spec.morgan_bits] for r in rows], spec.morgan_bits
-                    )
                 for position in group.positions:
-                    produced = predict_block(models[position], matrix, packed, popcount, options)
+                    produced = predict_block(models[position], matrix, options)
                     endpoint_stats[position]["n_predicted"] += produced.n_predicted
-                    endpoint_stats[position]["n_in_domain"] += produced.n_in_domain
                     for offset, text in enumerate(keys):
                         slots[text][position] = produced.values[offset]
                 t_predict += time.time() - t0

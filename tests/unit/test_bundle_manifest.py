@@ -55,7 +55,7 @@ def make_bundle(models_dir, key="dili", n_boosters=1, golden=None):
     from admetus.bundle.save import golden_fingerprint
     from admetus.chem.spec import get_spec
 
-    spec = get_spec("morgan")
+    spec = get_spec()
     golden = golden_fingerprint(spec) if golden is None else golden
     directory = models_dir / key
     directory.mkdir(parents=True)
@@ -113,7 +113,7 @@ def test_packaging_writes_a_manifest_naming_every_file_and_its_digest(tmp_path):
     assert names == ["ad_reference.npz", "bundle.json", "columns.npz", "fold_0.txt"]
     # The record a caller reads before downloading anything.
     assert entry["held_out"]["value"] == 0.9
-    assert entry["feature_set"] == "morgan"
+    assert entry["feature_set"] == "morgan_p23"
     assert (tmp_path / "dist" / mf.MANIFEST_FILE).is_file()
 
 

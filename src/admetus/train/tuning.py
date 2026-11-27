@@ -271,9 +271,8 @@ def auto_tune(
             can still produce the best trial's folds.
 
     Returns:
-        The :class:`TuneResult`, including the per-fold boosters of the best
-        trial, which supply the out-of-fold predictions that calibration, the
-        conformal width and the recommended threshold are all fitted on.
+        The :class:`TuneResult`. Its per-fold boosters are the tuner's own; the
+        ensemble that ships is fitted separately from the chosen parameters.
     """
     import optuna
     from optuna_integration.lightgbm import LightGBMTunerCV

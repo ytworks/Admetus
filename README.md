@@ -40,7 +40,7 @@ byte for byte as it found them.
   duplicate column names and column order all survive. Only the SMILES column is interpreted.
 - **A molecule that fails is reported, never substituted.** Unparseable input yields empty
   prediction cells and a reason, and does not fail the run.
-- **Automatic hyperparameter tuning**, over the same scaffold-grouped folds the model is
+- **Automatic hyperparameter tuning**, over the same folds the model is
   cross-validated on. Studies are kept in SQLite and resume.
 - **Honest numbers.** Every reported metric carries a bootstrap confidence interval, the
   cross-validation score is recorded as biased and never reported as performance, and small
@@ -60,9 +60,9 @@ assays.
    pharmacophore block enumerates sets of 2 or 3 pharmacophore features and the topological
    distance between each pair, so a bit means something like "a donor and an acceptor 4 to 5 bonds
    apart, with an aromatic 6 to 7 bonds from both".
-3. **Split by scaffold.** Scaffold groups are filled into training largest-first, which puts the
-   rare chemistry in the held-out set deliberately. A random split would flatter the model by
-   putting close analogues on both sides.
+3. **Hold out 20% at random**, seeded, and split the rest into folds. One model per fold,
+   each stopping early on its own validation rows; the ensemble is their mean and the spread
+   across them is reported beside the prediction.
 4. **Audit the split at the level the model can see.** Both fingerprint blocks are blind to
    stereochemistry, so a pair of enantiomers is one molecule as far as the model is concerned.
    Rows are hashed by feature vector and offending *training* rows dropped; held-out rows are kept,
@@ -70,12 +70,12 @@ assays.
 5. **Prune columns.** Columns set in too few or too many training molecules are dropped. The band
    is a prevalence rather than a count, because a fixed count means "1.8% of molecules" on the
    smallest dataset and "0.04%" on the largest.
-6. **Tune, then refit.** Hyperparameters come from the automatic tuner; the models that ship are
-   refitted afterwards at a fixed number of boosting rounds, so nothing that ships was stopped
-   using data it was then scored on.
-7. **Calibrate and measure.** Out-of-fold predictions give the probability calibration, the
-   recommended decision threshold and the conformal interval width. The held-out set is looked at
-   exactly once.
+6. **Tune, then keep the fold models.** Hyperparameters come from the automatic tuner, and the
+   models that ship are the fold models themselves -- each early-stopped on its own validation
+   rows, as the reference implementation does. Their out-of-fold predictions are therefore
+   optimistic on top of being a selection score, which is why nothing is reported from them.
+7. **Calibrate and measure.** Out-of-fold predictions give the probability calibration and the
+   recommended decision threshold. The held-out 20% is looked at exactly once.
 
 ## Requirements
 
@@ -167,7 +167,7 @@ admetus train --all --time-budget 900
 
 Run the official protocol, which trains on the benchmark group's own published split and scores
 its test set once per seed. The number this reports is the one comparable with the leaderboard;
-`admetus evaluate` reports this project's own scaffold split instead.
+`admetus evaluate` reports this project's own random holdout instead.
 
 ```bash
 admetus benchmark fetch
@@ -236,13 +236,17 @@ Three columns per endpoint by default, appended at the end of the row.
 |---|---|
 | `<key>` | The prediction. A calibrated probability of the positive class for classification, or a value on the published scale for regression |
 | `<key>_ens_sd` | Disagreement across the fold ensemble. On a log-scale endpoint this is named `<key>_sd_log10`, because a standard deviation of log values is not a standard deviation in the published unit |
-| `<key>_in_domain` | Whether the molecule has a training neighbour at or above a similarity threshold. A heuristic flag, and the bundle records the similarity-to-error curve it was derived from |
 
 One further column, `admetus_error`, carries the reason when a molecule could not be used.
 
-`--interval` adds `<key>_lo` and `<key>_hi` for regression endpoints, and `--ad-score` adds the
-nearest-neighbour similarity itself. `--column-prefix` namespaces everything, which makes a
-collision with your own columns impossible.
+`--column-prefix` namespaces everything, which makes a collision with your own columns
+impossible.
+
+An applicability-domain flag and a conformal prediction interval used to be here. Both were
+removed: measured, the flag carried no information at 16 of the 29 endpoints -- `dili` reported
+water as in-domain -- and the interval over-covered at 8 of 9 regression endpoints by enough to
+be unusable. Neither was asked for, and a column that looks like a safeguard without being one
+is worse than no column.
 
 `<key>_ens_sd` is deliberately not called a confidence. It measures how much the fold models
 disagree, which is only one component of uncertainty and, for classification, is largely a function
@@ -275,89 +279,24 @@ Three things worth knowing before reading several columns together:
 
 ## Benchmark
 
-All 29 endpoints are trained. Two columns, measuring different things:
+**No accuracy numbers here right now, on purpose.** The split changed: a scaffold-grouped
+holdout was replaced by the reference implementation's random 20% holdout with folds over the
+rest, so every number measured before it describes a pipeline this code no longer is. They were
+deleted rather than relabelled, and all 29 endpoints are being retrained.
 
-- **Held-out** is this project's own scaffold split, looked at once, with a bootstrap
-  interval. The largest scaffold groups go to training, so the held-out set is the
-  unusual chemistry on purpose and the estimate is pessimistic.
-- **Official protocol** is the benchmark group's published split: trained on its
-  `train_val` portion, scored once per seed on its test set, mean and standard
-  deviation over the protocol's five seeds. This is the column comparable with the
-  published leaderboard, and it covers the 22 endpoints of the official group.
-  **Taken with tuning off**, because five seeds is five tuning runs, so it is a floor
-  rather than a best effort.
+What will go here, once that finishes:
 
-| Endpoint | Metric | Held-out (95% CI) | Official protocol | Notes |
-|---|---|---|---|---|
-| `caco2` | mae | 0.3786 [0.3344, 0.4237] | 0.3214 +/- 0.0038 |  |
-| `pampa` | auroc | 0.6927 [0.6013, 0.7823] | no published split |  |
-| `hia` | auroc | 0.9034 [0.7483, 0.9972] | 0.9808 +/- 0.0027 | small test set |
-| `pgp` | auroc | 0.8919 [0.8462, 0.9306] | 0.9284 +/- 0.0006 |  |
-| `bioavailability` | auroc | 0.6750 [0.5507, 0.7955] | 0.7259 +/- 0.0130 |  |
-| `lipophilicity` | mae | 0.6633 [0.6261, 0.6990] | 0.6808 +/- 0.0008 | tuning budget-limited |
-| `solubility` | mae | 1.3204 [1.2619, 1.3805] | 1.1871 +/- 0.0054 | tuning budget-limited, official run partial |
-| `bbb` | auroc | 0.8731 [0.8256, 0.9135] | 0.8732 +/- 0.0019 |  |
-| `ppbr` | mae | 9.1137 [7.8984, 10.3877] | 7.7789 +/- 0.0362 |  |
-| `vdss` | spearman | 0.6304 [0.5308, 0.7162] | 0.6263 +/- 0.0042 |  |
-| `cyp2c9_veith` | auprc | 0.7190 [0.6846, 0.7542] | 0.7228 +/- 0.0006 | tuning budget-limited |
-| `cyp2d6_veith` | auprc | 0.7299 [0.6963, 0.7620] | 0.6615 +/- 0.0009 |  |
-| `cyp3a4_veith` | auprc | 0.7876 [0.7625, 0.8122] | 0.8288 +/- 0.0041 | tuning budget-limited |
-| `cyp1a2_veith` | auprc | 0.8661 [0.8500, 0.8820] | no published split | tuning budget-limited |
-| `cyp2c19_veith` | auprc | 0.7950 [0.7711, 0.8192] | no published split | tuning budget-limited |
-| `cyp2c9_substrate` | auprc | 0.2491 [0.1477, 0.3892] | 0.3627 +/- 0.0062 | interval reaches the base rate |
-| `cyp2d6_substrate` | auprc | 0.5038 [0.3780, 0.6707] | 0.6895 +/- 0.0114 |  |
-| `cyp3a4_substrate` | auroc | 0.6507 [0.5529, 0.7409] | 0.6537 +/- 0.0061 |  |
-| `half_life` | spearman | 0.2273 [0.0576, 0.3876] | 0.5551 +/- 0.0062 |  |
-| `clearance_hepatocyte` | spearman | 0.3804 [0.2533, 0.5000] | 0.4009 +/- 0.0041 |  |
-| `clearance_microsome` | spearman | 0.3869 [0.2671, 0.4913] | 0.5928 +/- 0.0093 |  |
-| `ld50` | mae | 0.5243 [0.4990, 0.5489] | 0.7075 +/- 0.0011 | tuning budget-limited |
-| `herg` | auroc | 0.8872 [0.8238, 0.9386] | 0.8454 +/- 0.0015 |  |
-| `herg_karim` | auroc | 0.8534 [0.8389, 0.8672] | no published split | tuning budget-limited |
-| `ames` | auroc | 0.8025 [0.7796, 0.8244] | 0.7745 +/- 0.0009 |  |
-| `dili` | auroc | 0.8342 [0.7518, 0.9119] | 0.9045 +/- 0.0035 | small test set |
-| `carcinogens` | auprc | 0.8101 [0.6002, 0.9453] | no published split | small test set |
-| `skin_reaction` | auroc | 0.6245 [0.4951, 0.7485] | no published split | small test set, interval reaches no signal |
-| `tox21_nr_ar` | auprc | 0.5079 [0.3900, 0.6164] | no published split |  |
+- **Held-out**, on the random 20%, with a bootstrap interval.
+- **Official protocol**, on the benchmark group's published split, mean and standard deviation
+  over its five seeds, for the 22 endpoints that have one.
 
-Read before quoting a number:
+Regenerate both with `python scripts/benchmark_tables.py`, which reads the bundles rather than
+being typed into: the two READMEs have to carry the same numbers and CI compares every numeric
+cell.
 
-- **The standard deviation over seeds is not comparable with the leaderboard's.** Here
-  the seed moves only the fold assignment inside the training portion; `train_val` is
-  not resampled into train and valid. The mean is comparable, the spread is not.
-- **Which split is harder depends on the endpoint, in both directions.** The official
-  split is easier at `half_life`, `clearance_microsome` and `cyp2d6_substrate`, and
-  harder at `ld50` and `vdss`.
-- **Eight endpoints are budget-limited.** At a 900-second tuner budget they completed
-  14 to 19 trials against 65 to 68 on the small ones, so those are floors for this
-  architecture rather than its ceiling.
-- **Three intervals reach no signal**, and that is the result rather than a gap in it:
-  `half_life`, `skin_reaction` and `cyp2c9_substrate`.
-- **The cross-validation score flattered the model at 26 of 29 endpoints**, by a median
-  of 0.053. It selects; it does not report.
-
-One official result is marked partial: 1,995 of solubility's 1,997 published test rows
-could be featurized, so its mean is over a subset.
-
-### Prediction intervals are too wide to use
-
-`--interval` works, and on the regression endpoints it over-covers at eight of nine,
-median 97.0% against a nominal 90%. In practice that means the bounds are not useful
-yet. Aspirin, from the shipped models:
-
-| Endpoint | Prediction | Interval |
-|---|---|---|
-| `caco2` | -4.6294 | [-17.4381, 8.17931] |
-| `vdss` | 0.260846 | [0.00249137, 27.3106] |
-
-Caco-2's bound spans 25 log units on a dataset whose labels run from -7.76 to -3.51.
-The width is fitted on out-of-fold residuals from fold models that each see four
-fifths of the data, then applied to the five-model ensemble, whose errors are smaller.
-Narrowing it changes a measured quantity, so it is listed as work with its own
-before-and-after rather than adjusted by eye. Until then, read `<key>_ens_sd` and the
-coverage recorded in each bundle instead.
-
-Full tables, the feature-set study behind the per-endpoint choices, and the
-engineering measurements are in [docs/benchmark.md](docs/benchmark.md).
+The feature-set study behind the per-endpoint choices and the engineering measurements are in
+[docs/benchmark.md](docs/benchmark.md) and are unaffected by the split change, except where they
+quote accuracy.
 
 ## Configuration
 
@@ -383,8 +322,13 @@ Three feature sets exist, and `--feature-set` overrides the choice.
 - **2D only.** No conformer generation, so stereochemistry is invisible to the model. Enantiomers
   receive identical predictions, and the training pipeline treats them as duplicates deliberately
   rather than pretending otherwise.
-- **`<key>_in_domain` is a heuristic**, not a guarantee. It says a similar training molecule
-  exists, which the bundle relates to expected error; it does not say the prediction is right.
+- **No applicability-domain flag.** There was one; measured, it carried no information at 16 of
+  the 29 endpoints, so it was removed rather than left looking like a safeguard. Nothing in the
+  output says whether a molecule resembles the training set, so a caller working outside
+  drug-like chemistry has to judge that themselves.
+- **No prediction intervals.** There were conformal ones; they over-covered at 8 of 9 regression
+  endpoints by enough to be useless. `<key>_ens_sd` is what is left, and it is a disagreement
+  measure, not an error bar.
 - **The cross-validation score is biased** and is recorded as such. Only the held-out numbers are
   reported.
 - **Small datasets.** Four endpoints have fewer than 600 compounds, so their test sets are under

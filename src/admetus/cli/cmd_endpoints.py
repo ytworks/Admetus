@@ -41,14 +41,6 @@ def _output_columns(endpoint, prefix: str = "") -> list[dict[str, object]]:
             "range": None,
             "meaning": "disagreement across the fold ensemble, not a calibrated error bar",
         },
-        {
-            "name": f"{base}_in_domain",
-            "dtype": "boolean",
-            "unit": None,
-            "range": None,
-            "meaning": "heuristic: the molecule has a training neighbour at or above the "
-                       "similarity threshold recorded in the bundle",
-        },
     ]
     return columns
 

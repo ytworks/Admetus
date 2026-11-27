@@ -15,14 +15,11 @@ dataset -- would select them with the official test compounds inside the search,
 is exactly the comparison the protocol exists to prevent. Running untuned is the
 cheaper honest option and is reported as such: a floor, not a best effort.
 
-The feature space is chosen the same way, and the first version of this module got it
-wrong. It inherited whatever the registry says, and three of the registry's entries
-carry a feature set that was *measured* by cross-validation over the whole dataset --
-which, for an endpoint of the official group, holds the published test compounds. On
-Caco-2 the selection data contained exact structure-label pairs for 97 of the 182
-official test rows, and on half-life for 102 of the 135. So the protocol asks for the
-size rule instead, which is a function of a row count and of nothing else, and records
-that it did.
+The feature space needs no decision here any more. It used to: the registry carried
+three measured per-endpoint overrides, and for an official-group endpoint the data
+that chose them held the published test compounds -- 97 of Caco-2's 182 test rows, 102
+of half-life's 135. Every endpoint now gets the same feature space, so there is nothing
+left to leak through.
 """
 
 from __future__ import annotations
@@ -35,7 +32,7 @@ from typing import Any
 import numpy as np
 
 from admetus.data.benchmark import OFFICIAL_SEEDS, OfficialSplit
-from admetus.data.registry import Endpoint, feature_set_from_size
+from admetus.data.registry import Endpoint
 from admetus.errors import AdmetusError
 from admetus.logging import get_logger
 from admetus.train import tuning
@@ -95,7 +92,6 @@ class OfficialResult:
     runs: list[SeedRun]
     failures: list[dict[str, Any]] = field(default_factory=list)
     tuned: bool = True
-    feature_set: str = ""
     n_seeds_requested: int = len(OFFICIAL_SEEDS)
 
     @property
@@ -162,8 +158,6 @@ class OfficialResult:
             "seeds": [r.to_dict() for r in self.runs],
             "failures": self.failures,
             "tuned_per_seed": self.tuned,
-            "feature_set": self.feature_set,
-            "feature_set_source": "size rule, which no label can influence",
             "n_seeds_requested": self.n_seeds_requested,
             "protocol": "published train_val/test split, one run per seed, mean and sd over seeds",
             "comparable_with_leaderboard": self.comparable,
@@ -184,7 +178,7 @@ def run_endpoint(
     endpoint: Endpoint,
     split: OfficialSplit,
     seeds: tuple[int, ...] = OFFICIAL_SEEDS,
-    folds: int = 5,
+    folds: int = 3,
     tune: bool = True,
     time_budget: int | None = tuning.DEFAULT_TIME_BUDGET_SECONDS,
     num_threads: int = 0,
@@ -212,9 +206,6 @@ def run_endpoint(
     Returns:
         The :class:`OfficialResult`.
     """
-    # Sized on the published training portion, not on the whole dataset, and taken
-    # from the rule rather than from the registry's measured overrides.
-    feature_set = feature_set_from_size(split.n_train_val)
     runs: list[SeedRun] = []
     failures: list[dict[str, Any]] = []
     for seed in seeds:
@@ -232,7 +223,6 @@ def run_endpoint(
                 bootstrap_resamples=0,
                 models_dir=seed_dir,
                 holdout=split.holdout,
-                feature_set=feature_set,
             )
         except AdmetusError as exc:
             log.error("%s seed %d: %s", endpoint.key, seed, exc)
@@ -258,7 +248,7 @@ def run_endpoint(
 
     result = OfficialResult(
         key=endpoint.key, metric=endpoint.metric, runs=runs, failures=failures, tuned=tune,
-        feature_set=feature_set, n_seeds_requested=len(seeds),
+        n_seeds_requested=len(seeds),
     )
     log.info("%s", result.describe())
     return result

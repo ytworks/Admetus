@@ -29,14 +29,12 @@ from admetus.bundle.save import (
     BOOSTER_PATTERN,
     BUNDLE_FILE,
     COLUMNS_FILE,
-    REFERENCE_FILE,
     golden_fingerprint,
 )
-from admetus.chem.similarity import Reference
 from admetus.chem.spec import FeaturizerSpec
 from admetus.errors import ModelError, SpecMismatchError
 from admetus.logging import get_logger
-from admetus.train import calibrate, conformal, transforms
+from admetus.train import calibrate, transforms
 from admetus.train.prune import ColumnBasis
 
 log = get_logger("bundle.load")
@@ -54,8 +52,6 @@ class LoadedModel:
         boosters: The fold ensemble.
         transform: Label transform, for mapping output back to the published scale.
         calibrator: Probability calibration, classification only.
-        interval: Conformal width, regression only.
-        reference: Applicability-domain reference set.
         unit: Unit of the published label.
         output_range: Range predictions are clamped to.
         decision_threshold: Recommended operating point, classification only.
@@ -69,8 +65,6 @@ class LoadedModel:
     boosters: list[Any]
     transform: transforms.Transform
     calibrator: calibrate.Calibrator | None
-    interval: conformal.ConformalInterval | None
-    reference: Reference | None
     unit: str
     output_range: tuple[float | None, float | None] | None
     decision_threshold: float | None
@@ -297,19 +291,6 @@ def load(directory: str, check_fingerprint: bool = True) -> LoadedModel:
     kept = np.load(path / COLUMNS_FILE)["kept_indices"].astype(np.int32)
     basis = ColumnBasis(kept=kept, n_raw=int(featurizer["n_raw_features"]))
 
-    reference = None
-    reference_path = path / REFERENCE_FILE
-    domain = meta.get("applicability_domain") or {}
-    if reference_path.is_file() and domain:
-        payload = np.load(reference_path)
-        reference = Reference(
-            packed=payload["packed"],
-            popcount=payload["popcount"].astype(np.int32),
-            n_bits=int(domain["n_bits"]),
-            threshold=float(domain["threshold"]),
-            subsampled=bool(domain.get("subsampled", False)),
-        )
-
     endpoint = meta["endpoint"]
     output_range = endpoint.get("output_range")
     return LoadedModel(
@@ -320,8 +301,6 @@ def load(directory: str, check_fingerprint: bool = True) -> LoadedModel:
         boosters=boosters,
         transform=transforms.from_dict(meta.get("transform")),
         calibrator=calibrate.from_dict(meta.get("calibrator")),
-        interval=conformal.from_dict(meta.get("interval")),
-        reference=reference,
         unit=endpoint.get("unit", ""),
         output_range=tuple(output_range) if output_range else None,
         decision_threshold=meta.get("decision_threshold"),

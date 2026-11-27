@@ -177,36 +177,40 @@ class FeaturizerSpec:
 
 
 #: The three presets the project trains and compares. ``morgan_p23`` is the default.
+#: The one feature space, and the reference implementation's: a radius-6 Morgan
+#: fingerprint over 2,048 bits concatenated with the 2- and 3-point pharmacophore
+#: signature, 89,852 columns in all.
+#:
+#: There used to be three presets and a rule that picked between them by dataset
+#: size, with three measured per-endpoint overrides on top. None of that was asked
+#: for: the reference featurizes every dataset the same way, including the
+#: 280-compound one its own notebook runs. The rule and the overrides are gone, and
+#: with them the study that chose them -- whose scores were measured on a split that
+#: no longer exists anyway.
+DEFAULT_FEATURE_SET = "morgan_p23"
+
 PRESETS: dict[str, FeaturizerSpec] = {
-    # Field-standard ECFP4 baseline, so the value of the pharmacophore block is measurable.
-    "morgan": FeaturizerSpec(
-        feature_set="morgan", morgan_radius=2, morgan_bits=2048, pharm_max_points=None
-    ),
-    # Morgan plus the 2-point pharmacophore: 37x narrower than the full space and
-    # much cheaper, because the 3-point enumeration is what costs time.
-    "morgan_p2": FeaturizerSpec(
-        feature_set="morgan_p2", morgan_radius=6, morgan_bits=2048, pharm_max_points=2
-    ),
-    # The default: Morgan plus the 2- and 3-point pharmacophore signature.
-    "morgan_p23": FeaturizerSpec(
-        feature_set="morgan_p23", morgan_radius=6, morgan_bits=2048, pharm_max_points=3
+    DEFAULT_FEATURE_SET: FeaturizerSpec(
+        feature_set=DEFAULT_FEATURE_SET, morgan_radius=6, morgan_bits=2048, pharm_max_points=3
     ),
 }
 
-DEFAULT_FEATURE_SET = "morgan_p23"
-
 
 def get_spec(feature_set: str = DEFAULT_FEATURE_SET) -> FeaturizerSpec:
-    """Look up a preset by name.
+    """Return the feature space.
+
+    Takes a name so a bundle written by an older version can still say which space
+    it used and be refused by name rather than by a confusing column mismatch.
 
     Raises:
-        ValueError: The name is not a known preset.
+        ValueError: The name is not the feature space this install builds.
     """
     try:
         return PRESETS[feature_set]
     except KeyError:
         raise ValueError(
-            f"unknown feature_set {feature_set!r}; expected one of {sorted(PRESETS)}"
+            f"this install builds one feature space, {DEFAULT_FEATURE_SET!r}, and was asked for "
+            f"{feature_set!r}. A bundle trained on another space cannot be used here."
         ) from None
 
 

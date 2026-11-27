@@ -49,10 +49,6 @@ MAX_JSON_ROWS = 10_000
               help="Molecules per worker task.")
 @click.option("--memo-size", type=int, default=runner.DEFAULT_MEMO_SIZE, show_default=True,
               help="Distinct molecules remembered across chunks.")
-@click.option("--ad/--no-ad", "applicability_domain", default=True, show_default=True,
-              help="Compute the applicability-domain flag. Off is faster.")
-@click.option("--ad-score", is_flag=True, help="Also emit the nearest-neighbour similarity itself.")
-@click.option("--interval", is_flag=True, help="Also emit prediction intervals, where available.")
 @click.option("--column-prefix", default="", help="Prefix every added column, e.g. admet_.")
 @click.option("--on-collision", type=click.Choice(["suffix", "error", "replace"]), default="suffix",
               show_default=True, help="What to do when an added column name already exists.")
@@ -79,9 +75,6 @@ def predict_command(
     chunksize: int,
     batch_size: int,
     memo_size: int,
-    applicability_domain: bool,
-    ad_score: bool,
-    interval: bool,
     column_prefix: str,
     on_collision: str,
     on_ragged: str,
@@ -150,9 +143,6 @@ def predict_command(
             chunk_size=chunksize,
             batch_size=batch_size,
             memo_size=memo_size,
-            applicability_domain=applicability_domain,
-            interval=interval,
-            ad_score=ad_score,
             column_prefix=column_prefix,
             on_collision=on_collision,
             on_ragged=on_ragged,

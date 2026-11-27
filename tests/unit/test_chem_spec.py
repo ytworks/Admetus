@@ -20,9 +20,15 @@ from admetus.chem.spec import (
 
 
 def test_preset_widths_are_the_documented_ones():
-    assert get_spec("morgan").n_features == 2048
-    assert get_spec("morgan_p2").n_features == 2372
-    assert get_spec("morgan_p23").n_features == 89_852
+    # One feature space, the reference implementation's: 2,048 Morgan bits plus the
+    # 2- and 3-point pharmacophore signature.
+    assert get_spec().n_features == 89_852
+    assert get_spec().morgan_bits == 2048
+    assert get_spec().morgan_radius == 6
+    assert get_spec().pharm_max_points == 3
+    # The block widths stay pinned, because an RDKit change that moved them would
+    # otherwise shift every bit index silently.
+    assert PHARM_SIG_SIZE == {2: 324, 3: 87_804}
 
 
 def test_pharmacophore_block_widths():
@@ -36,7 +42,7 @@ def test_sig_size_matches_rdkit():
     """The declared width must equal what RDKit actually builds."""
     from admetus.chem.pharm2d import get_sig_factory
 
-    for name in ("morgan_p2", "morgan_p23"):
+    for name in ("morgan_p23",):
         spec = get_spec(name)
         assert get_sig_factory(spec).GetSigSize() == spec.pharm_size
 
@@ -49,7 +55,7 @@ def test_feature_family_count_is_pinned():
 
 
 def test_unknown_preset_is_refused():
-    with pytest.raises(ValueError, match="unknown feature_set"):
+    with pytest.raises(ValueError, match="one feature space"):
         get_spec("no_such_set")
 
 
@@ -59,14 +65,14 @@ def test_round_trip_through_dict():
 
 
 def test_unknown_field_is_refused():
-    payload = get_spec("morgan_p23").to_dict()
+    payload = get_spec().to_dict()
     payload["surprise"] = 1
     with pytest.raises(ValueError, match="unknown featurizer spec fields"):
         FeaturizerSpec.from_dict(payload)
 
 
 def test_spec_digest_is_stable_and_distinct():
-    spec = get_spec("morgan_p23")
+    spec = get_spec()
     assert spec.spec_sha256 == FeaturizerSpec.from_dict(spec.to_dict()).spec_sha256
     digests = {s.spec_sha256 for s in PRESETS.values()}
     assert len(digests) == len(PRESETS)
@@ -74,7 +80,7 @@ def test_spec_digest_is_stable_and_distinct():
 
 def test_column_digest_tracks_the_retained_columns():
     """A bundle can share a spec yet disagree on columns; that must be detectable."""
-    spec = get_spec("morgan_p23")
+    spec = get_spec()
     full = spec.column_sha256(None)
     a = spec.column_sha256(np.array([1, 2, 3], dtype=np.int32))
     b = spec.column_sha256(np.array([1, 2, 4], dtype=np.int32))

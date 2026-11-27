@@ -102,7 +102,7 @@ def trained(tmp_path_factory):
     endpoint = synthetic_endpoint()
     model = train_endpoint(
         synthetic_endpoint(), synthetic_dataset(), folds=3, seed=0, tune=False,
-        num_threads=2, bootstrap_resamples=50, feature_set="morgan",
+        num_threads=2, bootstrap_resamples=50,
     )
     path = bundle_save.save(model, directory)
     return endpoint, model, path
@@ -112,7 +112,9 @@ def test_training_produces_a_complete_bundle(trained):
     _, model, path = trained
     assert (path / "bundle.json").is_file()
     assert (path / "columns.npz").is_file()
-    assert (path / "ad_reference.npz").is_file()
+    # No applicability-domain reference: the flag it served was removed after it
+    # measured as uninformative at 16 of 29 endpoints.
+    assert not (path / "ad_reference.npz").exists()
     assert len(list(path.glob("fold_*.txt"))) == model.n_boosters == 3
 
     record = json.loads((path / "bundle.json").read_text())
@@ -177,7 +179,7 @@ def test_predict_appends_columns_and_keeps_everything_else(trained, tmp_path):
         assert new.fields[: len(old.fields)] == old.fields
 
     header = produced[0].fields
-    assert header[4:] == ["fixture", "fixture_ens_sd", "fixture_in_domain", "admetus_error"]
+    assert header[4:] == ["fixture", "fixture_ens_sd", "admetus_error"]
     assert report.added_columns == header[4:]
 
 
@@ -188,9 +190,12 @@ def test_the_passthrough_bytes_are_unchanged(trained, tmp_path):
     original = source.read_bytes()
 
     dialect = csvio.sniff(destination)
+    # Three appended fields now: the prediction, the ensemble spread and the error
+    # column. The domain flag went with the applicability-domain machinery.
+    n_appended = 3
     rebuilt = b""
     for record in csvio.read_records(destination, dialect):
-        body = record.body.rsplit(",", 4)[0]
+        body = record.body.rsplit(",", n_appended)[0]
         rebuilt += (body + record.terminator).encode("utf-8")
     assert rebuilt == original
 
@@ -248,14 +253,6 @@ def test_worker_count_does_not_change_the_output(trained, tmp_path):
     assert outputs[0] == outputs[1]
 
 
-def test_turning_off_the_domain_removes_its_column(trained, tmp_path):
-    _, _, path = trained
-    _, destination, report = _predict(path, tmp_path, applicability_domain=False)
-    assert "fixture_in_domain" not in report.added_columns
-    header = next(csvio.read_records(destination, csvio.sniff(destination))).fields
-    assert header[4:] == ["fixture", "fixture_ens_sd", "admetus_error"]
-
-
 def test_a_column_prefix_namespaces_everything(trained, tmp_path):
     _, _, path = trained
     _, _, report = _predict(path, tmp_path, column_prefix="admet_")
@@ -288,7 +285,7 @@ def test_a_given_holdout_replaces_the_scaffold_split():
 
     model = train_endpoint(
         synthetic_endpoint(), dataset, folds=3, seed=0, tune=False,
-        num_threads=2, bootstrap_resamples=0, feature_set="morgan", holdout=holdout,
+        num_threads=2, bootstrap_resamples=0, holdout=holdout,
     )
 
     assert model.provenance["split"] == "given (published benchmark split)"
@@ -306,7 +303,7 @@ def test_a_holdout_of_the_wrong_shape_is_refused():
     with pytest.raises(InputDataError, match="holdout mask has shape"):
         train_endpoint(
             synthetic_endpoint(), dataset, folds=3, seed=0, tune=False,
-            feature_set="morgan", holdout=np.zeros(len(dataset) - 1, dtype=bool),
+            holdout=np.zeros(len(dataset) - 1, dtype=bool),
         )
 
 
@@ -315,53 +312,7 @@ def test_a_holdout_that_leaves_nothing_to_measure_is_refused():
     with pytest.raises(InputDataError, match="nothing can be measured"):
         train_endpoint(
             synthetic_endpoint(), dataset, folds=3, seed=0, tune=False,
-            feature_set="morgan", holdout=np.zeros(len(dataset), dtype=bool),
+            holdout=np.zeros(len(dataset), dtype=bool),
         )
 
 
-@pytest.fixture(scope="module")
-def trained_other_space(tmp_path_factory):
-    """A second model on a different feature space, for the mixed-space path."""
-    directory = tmp_path_factory.mktemp("models_p2")
-    model = train_endpoint(
-        synthetic_endpoint(), synthetic_dataset(), folds=3, seed=0, tune=False,
-        num_threads=2, bootstrap_resamples=50, feature_set="morgan_p2",
-    )
-    return bundle_save.save(model, directory)
-
-
-def test_endpoints_on_different_feature_spaces_predict_in_one_run(
-    trained, trained_other_space, tmp_path
-):
-    """The 29 endpoints do not share one feature space, so one run must span several.
-
-    The feature set is chosen per endpoint by measurement, which left the registry
-    with three spaces. Refusing a mixed selection would mean no single run could fill
-    in every column, and merging three CSVs by hand is exactly what the byte-
-    preserving contract exists to avoid.
-    """
-    _, _, morgan_path = trained
-    source = tmp_path / "in.csv"
-    source.write_bytes(TRICKY.encode("utf-8"))
-    destination = tmp_path / "out.csv"
-
-    bundle_load.load.cache_clear()
-    models = [bundle_load.load(str(morgan_path)), bundle_load.load(str(trained_other_space))]
-    assert len({m.spec.spec_sha256 for m in models}) == 2
-
-    report = runner.run(source, destination, models, runner.Options(jobs=1))
-
-    # Both endpoints contributed their columns, in the order they were asked for.
-    assert report.added_columns.count("fixture") == 1
-    assert "fixture_admetus" in report.added_columns
-    # The molecule that cannot be parsed still fails in both spaces, once.
-    assert report.n_failed == 1
-    assert report.n_featurized == 3
-
-    header = next(csvio.read_records(destination, csvio.sniff(destination))).fields
-    assert header[:4] == ["compound_id", "smiles", "project", "note"]
-    body = destination.read_bytes()
-    # The byte-order mark survives in the bytes, where it belongs.
-    assert body.startswith(b"\xef\xbb\xbf")
-    assert b"multi\nline note" in body
-    assert body.count(b"\r\n") >= 4

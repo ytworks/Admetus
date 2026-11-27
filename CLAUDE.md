@@ -18,15 +18,22 @@ contradict plausible-sounding estimates, and the measurements are what the desig
   digests it; `standardize.py`, `morgan.py`, `pharm2d.py`, `featurizer.py` build it;
   `similarity.py` does packed-bit Tanimoto; `parallel.py` runs the spawn pool.
 - `src/admetus/data/` — `endpoints.yaml` is the registry and the source of truth for dataset
-  digests. `download.py`, `loader.py`, `audit.py` (feature-level leakage), `splits.py` (scaffold
-  grouping and folds).
+  digests. `download.py`, `loader.py`, `benchmark.py` (the published splits), `splits.py` (the
+  random holdout and the folds over it).
 - `src/admetus/train/` — `metrics.py`, `transforms.py`, `prune.py`, `cv.py`, `objectives.py`,
-  `tuning.py` (the automatic tuner), `calibrate.py`, `conformal.py`, `trainer.py` (orchestration).
+  `tuning.py` (the automatic tuner), `calibrate.py`, `official.py` (the five-seed protocol),
+  `trainer.py` (orchestration).
 - `src/admetus/bundle/` — persistence, with verification that refuses a mismatched column space.
 - `src/admetus/predict/` — `csvio.py` holds the byte-preserving CSV contract; `runner.py` drives it.
 - `src/admetus/cli/` — one module per command.
 
 ## Rules specific to this project
+
+0. **The reference implementation is the specification.** `models.py` and the
+   `Carcinogens_Lagunin` notebook define the featurization, the split, the ensemble and the
+   outputs. Anything beyond them is an addition, and an addition has to be asked for and then
+   measured to be worth keeping. Of 25 review findings on this branch, none were in the
+   featurize-train-predict path; all were in layers added on top of it.
 
 1. **Never report a number you have not measured.** Every figure in the README's benchmark
    section and in `docs/benchmark.md` came from a run that is reproducible by the script named
@@ -39,8 +46,8 @@ contradict plausible-sounding estimates, and the measurements are what the desig
    bootstrap interval, or from the official protocol.
 3. **Never substitute a molecule.** A parse failure is reported with a reason. There is a test
    asserting no substitution happens; do not relax it.
-4. **The held-out set is sacred.** It is looked at once, at training time. Leakage-audit
-   collisions drop training rows, never held-out rows.
+4. **The held-out set is sacred.** It is the random 20% and it is looked at once, at training
+   time. Nothing selects against it: not a hyperparameter, not a calibrator, not a feature space.
 5. **Passthrough CSV bytes are not yours to reformat.** Do not route the prediction path through
    pandas. `csvio.py` explains why, with the list of things that break.
 6. **The registry is the source of truth for dataset digests.** A mismatch is refused.
@@ -48,7 +55,7 @@ contradict plausible-sounding estimates, and the measurements are what the desig
 7. **Both READMEs change together.** `scripts/check_readme_pair.py` compares the heading outline,
    the commands in code blocks, the links and the numbers in tables. CI runs it.
 8. **Honesty in docstrings.** Where a guarantee is partial, say so. The digest pinning says it is
-   still trust on first use; `in_domain` says it is a heuristic; the tuner's record names the two
+   still trust on first use; the tuner's record names the two
    costs of delegating the search space.
 
 ## Test policy
@@ -57,10 +64,8 @@ contradict plausible-sounding estimates, and the measurements are what the desig
 - No test may touch the network. Datasets are fetched, not vendored, and tests use fixtures.
 - A test asserting current behaviour is a contract. If a change makes one fail, decide whether the
   behaviour or the test is wrong, and say which in the commit message.
-- Fixtures for training need a label that is a function of the structure but **not** of the
-  scaffold. A random label makes the leakage audit discard the training set as contradictory; a
-  scaffold-determined label makes grouped stratification impossible. Both were found by the code
-  correctly refusing a bad fixture.
+- Fixtures for training need a label that is a function of the structure, or the model has
+  nothing to learn and the metrics come out at chance.
 
 ## Style
 

@@ -230,29 +230,36 @@ def test_feature_spaces_are_grouped_in_the_order_they_first_appear():
     space need not be adjacent in it. The 29 endpoints span three spaces, and the
     interleaving below is the real registry order in miniature.
     """
-    from admetus.chem.spec import get_spec
+    from admetus.chem.spec import FeaturizerSpec
     from admetus.predict.runner import spec_groups
 
+    # Built directly rather than from presets: this install publishes one feature
+    # space, and the grouping still has to be right for a caller holding bundles
+    # from a version that published more than one.
+    wide = FeaturizerSpec(feature_set="wide", morgan_radius=6, morgan_bits=2048, pharm_max_points=3)
+    narrow = FeaturizerSpec(feature_set="narrow", morgan_radius=6, morgan_bits=2048, pharm_max_points=2)
+    plain = FeaturizerSpec(feature_set="plain", morgan_radius=2, morgan_bits=2048, pharm_max_points=None)
+
     class Fake:
-        def __init__(self, name):
-            self.spec = get_spec(name)
+        def __init__(self, spec):
+            self.spec = spec
 
-    models = [Fake("morgan_p23"), Fake("morgan_p2"), Fake("morgan_p23"), Fake("morgan")]
-    groups = spec_groups(models)
+    groups = spec_groups([Fake(wide), Fake(narrow), Fake(wide), Fake(plain)])
 
-    assert [g.spec.feature_set for g in groups] == ["morgan_p23", "morgan_p2", "morgan"]
+    assert [g.spec.feature_set for g in groups] == ["wide", "narrow", "plain"]
     assert [g.positions for g in groups] == [(0, 2), (1,), (3,)]
 
 
 def test_one_feature_space_gives_one_group():
+    """The normal case now: every bundle this install writes shares one space."""
     from admetus.chem.spec import get_spec
     from admetus.predict.runner import spec_groups
 
     class Fake:
-        def __init__(self, name):
-            self.spec = get_spec(name)
+        def __init__(self):
+            self.spec = get_spec()
 
-    groups = spec_groups([Fake("morgan_p2"), Fake("morgan_p2")])
+    groups = spec_groups([Fake(), Fake()])
     assert len(groups) == 1
     assert groups[0].positions == (0, 1)
 

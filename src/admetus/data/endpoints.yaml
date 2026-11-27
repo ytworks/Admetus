@@ -26,14 +26,11 @@
 #   standardize         Override the default standardization pipeline.
 #   correlated_with     Other endpoints whose predictions are not independent.
 #   expected_rows       Row count after normalization. Verified at fetch time.
-#   feature_set         Override the feature space the size rule would choose.
-#                       Present only where the measurement in docs/benchmark.md
-#                       disagreed with that rule by more than its noise floor.
 #   notes               Why anything unusual above is the way it is.
 #
-# Defaults that are computed rather than stored: feature_set, trials, cv_repeats
-# and low_confidence all follow from the training set size (see registry.py), so
-# they are not duplicated per endpoint.
+# Defaults that are computed rather than stored: the pruning band, the search budget
+# and low_confidence all follow from the training set size (see registry.py). The
+# feature space does not: every endpoint gets the same one.
 
 schema_version: 1
 
@@ -52,10 +49,6 @@ endpoints:
     unit: log cm/s
     in_official_group: true
     expected_rows: 906
-    feature_set: morgan_p23
-    notes: >-
-      The size rule would pick morgan_p2 at 906 rows, but measured the 3-point
-      pharmacophore block is worth 0.0063 MAE here, above its own noise floor.
     description: Caco-2 cell effective permeability.
 
   - key: pampa
@@ -281,11 +274,9 @@ endpoints:
     output_range: [0.0, null]
     in_official_group: true
     expected_rows: 665
-    feature_set: morgan_p23
     notes: >-
       Spans roughly 0.065 to 1200 hours. Trained in log10 space for the same
-      reason as vdss. The size rule would pick morgan_p2 at 665 rows; measured,
-      the full space is worth 0.021 Spearman, twice its noise floor.
+      reason as vdss.
     description: Terminal half-life.
 
   - key: clearance_hepatocyte
@@ -415,12 +406,7 @@ endpoints:
     unit: binary
     in_official_group: false
     expected_rows: 7265
-    feature_set: morgan
     notes: >-
-      The only endpoint where the pharmacophore blocks measurably hurt: average
-      precision falls from 0.507 on Morgan alone to 0.483 on the full space. At
-      4.3% positive there are about 310 actives, and the wider space costs more
-      in variance than it adds in signal.
       One assay of the Tox21 panel: the androgen receptor, not general toxicity.
       The published file is wide, with one column per assay; the other 11 assays
       can be added as further entries without code changes.

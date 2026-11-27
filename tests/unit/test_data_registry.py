@@ -82,11 +82,17 @@ def test_species_filter_only_where_the_file_has_one():
     assert with_filter == ["ppbr"]
 
 
-def test_feature_set_follows_dataset_size():
-    endpoint = get_endpoint("dili")
-    assert endpoint.feature_set(400) == "morgan_p2"
-    assert endpoint.feature_set(5000) == "morgan_p23"
+def test_every_endpoint_gets_the_same_feature_space():
+    """The size rule and the three measured overrides are gone.
 
+    The reference implementation featurizes every dataset the same way, including
+    the 280-compound one its own notebook runs, so there is nothing to choose.
+    """
+    spaces = {e.featurizer_spec().feature_set for e in all_endpoints()}
+    assert spaces == {"morgan_p23"}
+    # And the row count no longer changes the answer.
+    small, large = get_endpoint("carcinogens"), get_endpoint("herg_karim")
+    assert small.featurizer_spec(220).feature_set == large.featurizer_spec(13_445).feature_set
 
 def test_featurizer_spec_carries_the_endpoint_pipeline():
     spec = get_endpoint("solubility").featurizer_spec(9982)
@@ -126,7 +132,7 @@ def test_low_confidence_is_flagged_for_small_datasets():
 def test_json_description_is_complete():
     payload = get_endpoint("vdss").to_json()
     for field in ("key", "task", "metric", "direction", "unit", "transform", "n_rows",
-                  "low_confidence", "feature_set", "correlated_with", "in_official_group"):
+                  "low_confidence", "correlated_with", "in_official_group"):
         assert field in payload
     assert payload["direction"] == "higher_is_better"
     assert payload["transform"] == "log10_safe"

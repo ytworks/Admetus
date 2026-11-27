@@ -21,7 +21,7 @@ from admetus.cli.options import (
     run_guarded,
     setup_logging,
 )
-from admetus.data import loader
+from admetus.data import loader, splits
 from admetus.data.registry import resolve_keys
 from admetus.errors import EXIT_NO_MODEL, AdmetusError
 from admetus.logging import get_logger
@@ -36,7 +36,10 @@ log = get_logger("cli.train")
 @all_option
 @data_dir_option
 @models_dir_option
-@click.option("--folds", type=int, default=5, show_default=True, help="Cross-validation folds.")
+@click.option(
+    "--folds", type=int, default=splits.DEFAULT_FOLDS, show_default=True,
+    help="Cross-validation folds over the training portion, and so ensemble members.",
+)
 @click.option(
     "--time-budget", type=int, default=None,
     help="Wall-clock cap for tuning one endpoint, in seconds. The tuner's trial count is "
@@ -45,10 +48,6 @@ log = get_logger("cli.train")
 @click.option(
     "--tune/--no-tune", default=True, show_default=True,
     help="Run the automatic LightGBM tuner. --no-tune uses fixed parameters.",
-)
-@click.option(
-    "--feature-set", type=click.Choice(["morgan", "morgan_p2", "morgan_p23"]), default=None,
-    help="Override the feature space. Default follows dataset size.",
 )
 @click.option("--seed", type=int, default=0, show_default=True, help="Seed for splits and the sampler.")
 @click.option("--jobs", type=int, default=0, help="LightGBM threads. 0 lets LightGBM decide.")
@@ -65,7 +64,6 @@ def train_command(
     folds: int,
     time_budget: int | None,
     tune: bool,
-    feature_set: str | None,
     seed: int,
     jobs: int,
     bootstrap: int,
@@ -108,7 +106,7 @@ def train_command(
                     time_budget=time_budget if time_budget is not None
                     else tuning.DEFAULT_TIME_BUDGET_SECONDS,
                     num_threads=jobs, bootstrap_resamples=bootstrap,
-                    models_dir=models, feature_set=feature_set,
+                    models_dir=models,
                 )
                 path = bundle_save.save(model, models)
                 results.append({
@@ -117,7 +115,6 @@ def train_command(
                     "metric": endpoint.metric,
                     "primary": model.test_metrics["primary"],
                     "n_features": model.basis.n_cols,
-                    "feature_set": model.spec.feature_set,
                     # Biased by construction; it ranks candidates and is not performance.
                     "pooled_oof_score": model.cv_record["pooled_oof_score"],
                     "seconds": model.provenance["train_seconds"],
@@ -213,7 +210,6 @@ def evaluate_command(
                     "deliver. Retrain to record MCC at the cutoff the bundle ships."
                 ) if legacy_mcc else None,
                 "cv_score_biased": (meta.get("cross_validation") or {}).get("cv_score_biased", True),
-                "interval_coverage": metrics.get("interval_coverage"),
                 "low_confidence": metrics.get("low_confidence"),
             })
 
@@ -253,8 +249,6 @@ def evaluate_command(
                 notes.append("MCC is retrospective only")
             if row["low_confidence"]:
                 notes.append("small dataset")
-            if row["interval_coverage"] is not None:
-                notes.append(f"interval covers {row['interval_coverage']:.0%}")
             if not row["in_official_group"]:
                 notes.append("not in the official group")
             click.echo(

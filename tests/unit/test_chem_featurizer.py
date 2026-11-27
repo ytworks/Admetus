@@ -21,8 +21,6 @@ GOLDEN_SMILES = [
 #: Digest of the canonical SMILES and on-bit indices of :data:`GOLDEN_SMILES`.
 #: A change here means the feature space moved and every trained model is stale.
 GOLDEN_DIGESTS = {
-    "morgan": "cac9aecac7f95504aa8a1400956aa6e4",
-    "morgan_p2": "293670163f269ceb8a7fc9bf38ce370e",
     "morgan_p23": "286761bcfa26aadb11fd2b4b81970e42",
 }
 
@@ -46,7 +44,7 @@ def test_fingerprints_match_the_golden_digest(feature_set):
 
 @pytest.mark.parametrize(
     ("feature_set", "width"),
-    [("morgan", 2048), ("morgan_p2", 2372), ("morgan_p23", 89_852)],
+    [("morgan_p23", 89_852)],
 )
 def test_matrix_width_is_the_declared_one(feature_set, width):
     result = featurize_many(["CCO"], get_spec(feature_set))
@@ -101,8 +99,8 @@ def test_fingerprints_agree_across_spawned_processes():
     """Inference runs in a spawn pool, so bits must not depend on the process."""
     ctx = multiprocessing.get_context("spawn")
     with ctx.Pool(processes=2) as pool:
-        got = pool.map(_digest_in_worker, ["morgan_p23", "morgan_p2"])
-    assert got == [GOLDEN_DIGESTS["morgan_p23"], GOLDEN_DIGESTS["morgan_p2"]]
+        got = pool.map(_digest_in_worker, ["morgan_p23", "morgan_p23"])
+    assert got == [GOLDEN_DIGESTS["morgan_p23"], GOLDEN_DIGESTS["morgan_p23"]]
 
 
 def test_failures_are_reported_in_order_and_never_substituted():
@@ -153,7 +151,7 @@ def test_projection_of_an_unmapped_index_yields_nothing():
 
 
 def test_projection_without_width_is_refused():
-    spec = get_spec("morgan")
+    spec = get_spec()
     col_map = np.zeros(spec.n_features, dtype=np.int32)
     with pytest.raises(ValueError, match="n_cols is required"):
         featurize_many(["CCO"], spec, col_map=col_map)
@@ -175,9 +173,14 @@ def test_two_in_process_featurizers_do_not_share_one_spec():
     column indexing crashes the interpreter on rather than refusing.
     """
     from admetus.chem.parallel import Featurizer
-    from admetus.chem.spec import get_spec
+    from admetus.chem.spec import FeaturizerSpec
 
-    narrow, wide = get_spec("morgan"), get_spec("morgan_p2")
+    narrow = FeaturizerSpec(
+        feature_set="narrow", morgan_radius=2, morgan_bits=2048, pharm_max_points=None
+    )
+    wide = FeaturizerSpec(
+        feature_set="wide", morgan_radius=6, morgan_bits=2048, pharm_max_points=2
+    )
     smiles = ["CC(=O)Oc1ccccc1C(=O)O", "CN1C=NC2=C1C(=O)N(C)C(=O)N2C"]
 
     with Featurizer(narrow, jobs=1) as a, Featurizer(wide, jobs=1) as b:

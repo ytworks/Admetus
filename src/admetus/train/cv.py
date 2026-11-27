@@ -37,7 +37,7 @@ MIN_ROWS_FOR_EARLY_STOPPING = 1_000
 WATCHLIST_FRACTION = 0.12
 
 #: Rounds without improvement before stopping.
-EARLY_STOPPING_ROUNDS = 50
+EARLY_STOPPING_ROUNDS = 100
 
 #: Upper bound on boosting rounds when early stopping is active.
 MAX_BOOST_ROUNDS = 3_000
@@ -115,6 +115,7 @@ def fit_fold(
     params: dict[str, object],
     num_boost_round: int | None = None,
     seed: int = 0,
+    stop_on_fold: bool = False,
 ) -> FoldFit:
     """Fit one fold and predict its validation rows.
 
@@ -123,9 +124,15 @@ def fit_fold(
         y: Labels for the whole training set, in the fitted space.
         fold: Which rows train and which are held out.
         params: LightGBM parameters, already including the objective.
-        num_boost_round: Fixed round count. When ``None``, early stopping decides,
-            using a watchlist carved from the fold's own training rows.
-        seed: Seed for the watchlist split.
+        num_boost_round: Fixed round count. When ``None``, early stopping decides.
+        seed: Seed for the watchlist split, when one is carved.
+        stop_on_fold: Early-stop on the fold's **own** validation rows, which is
+            what the reference implementation does: each ensemble member stops on
+            the rows it is then asked to predict. That makes this fold's prediction
+            optimistic, so the number that gets reported comes from the 20% holdout
+            and never from here. The alternative -- carving an inner watchlist from
+            the fold's training rows -- keeps the fold prediction honest but is not
+            the arrangement that was asked for.
 
     Returns:
         The fitted fold.
@@ -140,6 +147,21 @@ def fit_fold(
         booster = lgb.train(params, dataset, num_boost_round=num_boost_round)
         used_early_stopping = False
         best_iteration = num_boost_round
+    elif stop_on_fold:
+        fit_set = lgb.Dataset(x_train, label=y_train, params=params, free_raw_data=False)
+        valid_set = lgb.Dataset(
+            matrix[valid_rows], label=y[valid_rows], reference=fit_set, params=params,
+            free_raw_data=False,
+        )
+        booster = lgb.train(
+            params,
+            fit_set,
+            num_boost_round=MAX_BOOST_ROUNDS,
+            valid_sets=[valid_set],
+            callbacks=[lgb.early_stopping(EARLY_STOPPING_ROUNDS, verbose=False)],
+        )
+        used_early_stopping = True
+        best_iteration = int(booster.best_iteration or booster.num_trees())
     elif x_train.shape[0] < MIN_ROWS_FOR_EARLY_STOPPING:
         # Too small for a watchlist; the caller should have been tuning the round
         # count instead, but fall back to a fixed, modest number of rounds.

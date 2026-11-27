@@ -11,8 +11,8 @@ Three things this will not do:
   was written the one time the held-out set was looked at.
 * It never fills a gap. An endpoint with no bundle is a dash, and an endpoint with no
   official run is absent from the official table.
-* It never quotes a cross-validation score. Those rank candidates; `docs/benchmark.md`
-  reports them under the feature-set study, labelled, and nowhere else.
+* It never quotes a cross-validation score. Those rank candidates and are recorded in
+  each bundle, labelled as biased, and reported nowhere.
 
 Usage::
 
@@ -60,25 +60,24 @@ def held_out_table(models_dir: Path, official_only: bool = False) -> str:
     """One row per endpoint: the held-out metric with its bootstrap interval."""
     present = set(available(models_dir))
     lines = [
-        "| Endpoint | Task | Metric | Held-out | 95% CI | n | Feature set |",
-        "|---|---|---|---|---|---|---|",
+        "| Endpoint | Task | Metric | Held-out | 95% CI | n |",
+        "|---|---|---|---|---|---|",
     ]
     for endpoint in all_endpoints():
         if official_only and not endpoint.in_official_group:
             continue
         task = "classification" if endpoint.is_classification else "regression"
         if endpoint.key not in present:
-            lines.append(f"| `{endpoint.key}` | {task} | {endpoint.metric} | - | - | - | - |")
+            lines.append(f"| `{endpoint.key}` | {task} | {endpoint.metric} | - | - | - |")
             continue
         meta = read_metadata(models_dir / endpoint.key)
         primary = (meta.get("metrics") or {}).get("primary") or {}
-        spec = (meta.get("featurizer") or {}).get("spec") or {}
         lines.append(
             f"| `{endpoint.key}` | {task} | {endpoint.metric} | "
             f"{_format(primary.get('value'), endpoint.metric)} | "
             f"[{_format(primary.get('ci_low'), endpoint.metric)}, "
             f"{_format(primary.get('ci_high'), endpoint.metric)}] | "
-            f"{primary.get('n', '-')} | `{spec.get('feature_set', '-')}` |"
+            f"{primary.get('n', '-')} |"
         )
     return "\n".join(lines)
 
@@ -111,27 +110,6 @@ def official_table(report: Path) -> str:
     return "\n".join(lines)
 
 
-def coverage_table(models_dir: Path) -> str:
-    """Interval coverage for the regression endpoints, against the nominal level."""
-    present = set(available(models_dir))
-    rows = []
-    for endpoint in all_endpoints():
-        if endpoint.is_classification or endpoint.key not in present:
-            continue
-        meta = read_metadata(models_dir / endpoint.key)
-        metrics = meta.get("metrics") or {}
-        achieved = metrics.get("interval_coverage")
-        if achieved is None:
-            continue
-        nominal = metrics.get("interval_level", 0.9)
-        rows.append(f"| `{endpoint.key}` | {nominal:.0%} | {achieved:.1%} | {metrics['n_test']} |")
-    if not rows:
-        return ""
-    return "\n".join(
-        ["| Endpoint | Nominal | Measured coverage | Held-out rows |", "|---|---|---|---|", *rows]
-    )
-
-
 def summary(models_dir: Path) -> str:
     """A line naming how much of the registry is actually trained."""
     present = available(models_dir)
@@ -151,12 +129,8 @@ def main() -> int:
     args = parser.parse_args()
 
     print(f"<!-- {summary(args.models_dir)} -->\n")
-    print("### Held-out scaffold split\n")
+    print("### Held-out, on the random 20%\n")
     print(held_out_table(args.models_dir))
-    coverage = coverage_table(args.models_dir)
-    if coverage:
-        print("\n### Prediction interval coverage\n")
-        print(coverage)
     if args.official:
         print("\n### Official protocol\n")
         print(official_table(args.official))

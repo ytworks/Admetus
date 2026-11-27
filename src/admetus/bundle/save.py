@@ -28,7 +28,6 @@ from admetus.version import SCHEMA_VERSION, get_version
 
 BUNDLE_FILE = "bundle.json"
 COLUMNS_FILE = "columns.npz"
-REFERENCE_FILE = "ad_reference.npz"
 BOOSTER_PATTERN = "fold_{index}.txt"
 
 
@@ -94,11 +93,6 @@ def save(model: TrainedModel, directory: Path) -> Path:
         booster.save_model(str(staging / BOOSTER_PATTERN.format(index=index)), num_iteration=model.rounds)
 
     np.savez_compressed(staging / COLUMNS_FILE, kept_indices=model.basis.kept.astype(np.int32))
-    np.savez_compressed(
-        staging / REFERENCE_FILE,
-        packed=model.reference.packed,
-        popcount=model.reference.popcount.astype(np.int32),
-    )
 
     endpoint = model.endpoint
     payload = {
@@ -132,19 +126,6 @@ def save(model: TrainedModel, directory: Path) -> Path:
         "transform": model.transform.to_dict(),
         "calibrator": model.calibrator.to_dict() if model.calibrator else None,
         "decision_threshold": model.best_threshold,
-        "interval": model.interval.to_dict() if model.interval else None,
-        "applicability_domain": {
-            "threshold": model.provenance["domain_threshold"],
-            "n_reference": model.reference.n_reference,
-            "subsampled": model.reference.subsampled,
-            "fingerprint": "morgan",
-            "n_bits": model.spec.morgan_bits,
-            "error_curve": model.provenance["domain_error_curve"],
-            "note": (
-                "A heuristic flag. True means the molecule has a training neighbour at or "
-                "above the threshold, which the error curve relates to expected error."
-            ),
-        },
         "metrics": model.test_metrics,
         "cross_validation": model.cv_record,
         "provenance": model.provenance,
@@ -164,7 +145,6 @@ __all__ = [
     "BOOSTER_PATTERN",
     "BUNDLE_FILE",
     "COLUMNS_FILE",
-    "REFERENCE_FILE",
     "golden_fingerprint",
     "save",
 ]

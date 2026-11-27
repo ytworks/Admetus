@@ -25,6 +25,7 @@ from admetus.cli.options import (
     write_report,
 )
 from admetus.data import benchmark as bench
+from admetus.data import splits as bench_splits
 from admetus.data.registry import get_endpoint, official_endpoints
 from admetus.errors import AdmetusError, UsageError
 from admetus.logging import get_logger
@@ -96,7 +97,10 @@ def fetch_command(ctx: click.Context, data_dir: Path | None, overwrite: bool, as
 @endpoint_option
 @all_option
 @data_dir_option
-@click.option("--folds", type=int, default=5, show_default=True, help="Cross-validation folds inside train_val.")
+@click.option(
+    "--folds", type=int, default=bench_splits.DEFAULT_FOLDS, show_default=True,
+    help="Cross-validation folds inside train_val.",
+)
 @click.option(
     "--seeds", type=int, default=len(bench.OFFICIAL_SEEDS), show_default=True,
     help="How many of the protocol's seeds to run. Fewer than five is not a comparable number.",
@@ -179,7 +183,6 @@ def run_command(
             "archive_sha256": bench.ARCHIVE_SHA256,
             "seeds": list(chosen_seeds),
             "complete_protocol": len(chosen_seeds) == len(bench.OFFICIAL_SEEDS),
-            "feature_set_source": "size rule, which no label can influence",
             "tuned_per_seed": tune,
             "time_budget_seconds": budget if tune else None,
             "n_endpoints": len(results),
